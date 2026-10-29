@@ -21,6 +21,10 @@ function emptyPending() {
   return { double: false, plus3: false, adjust: false, rest: false, reverse: false };
 }
 
+const SELF_EFFECTS = ['double', 'plus3', 'adjust'];
+const OPPONENT_EFFECTS = ['rest', 'reverse'];
+const CHOICE_EFFECTS = ['remove', 'fix', 'steal', 'plant'];
+
 // match: setupMatch の戻り値
 export function newGame(match) {
   const board = Array(SIZE * SIZE).fill(null);
@@ -117,11 +121,19 @@ export function playMove(state, idx, adjust = 0) {
     next.result = { winner: next.p === 0 ? 'B' : 'W', reason: 'birthday' };
     return next;
   }
-  return finishTurn(next, false);
+  let extraTurn = false;
+  const event = days > 0 ? next.events[next.p] : null;
+  if (event && !event.used) {
+    event.used = true;
+    next.lastMove.event = { ...event };
+    extraTurn = applyEffect(next, event.effect, color);
+  }
+  return finishTurn(next, extraTurn);
 }
 
-// 盤面が埋まっていれば判定で終局、そうでなければ次の手番へ
+// 盤面が埋まっていれば判定で終局、そうでなければ次の手番へ。石やマスを選ぶ途中なら何もしない。
 function finishTurn(state, extraTurn) {
+  if (state.phase === 'choose') return state;
   if (state.board.every(Boolean)) {
     state.phase = 'over';
     state.result = judgeFull(state);
@@ -145,4 +157,57 @@ export function judgeFull(state) {
   const { B, W } = countStones(state);
   if (B !== W) return { winner: B > W ? 'B' : 'W', reason: 'full' };
   return { winner: null, reason: 'full' };
+}
+
+// 効果を適用する(state を直接書き換える)。もう一手なら true を返す。
+function applyEffect(state, effect, color) {
+  if (SELF_EFFECTS.includes(effect)) {
+    state.pending[color][effect] = true;
+  } else if (OPPONENT_EFFECTS.includes(effect)) {
+    state.pending[opponent(color)][effect] = true;
+  } else if (effect === 'extraTurn') {
+    return true;
+  } else if (effect === 'middle') {
+    state.p = Math.floor(state.match.D / 2);
+    state.lastMove.warpTo = state.p;
+  } else if (effect === 'resetWeights') {
+    for (const stone of state.board) if (stone) stone.flips = 0;
+  } else if (CHOICE_EFFECTS.includes(effect)) {
+    state.choice = { effect, player: color };
+    if (choiceTargets(state).length > 0) {
+      state.phase = 'choose';
+    } else {
+      state.choice = null;
+      state.lastMove.fizzled = true;
+    }
+  }
+  return false;
+}
+
+// 石やマスを選ぶ効果で、選べるマス
+export function choiceTargets(state) {
+  if (!state.choice) return [];
+  const { effect, player } = state.choice;
+  const targets = [];
+  state.board.forEach((stone, idx) => {
+    let ok;
+    if (effect === 'plant') ok = !stone;
+    else if (effect === 'fix') ok = stone && stone.color === player && !stone.fixed;
+    else ok = stone && stone.color === opponent(player) && !stone.fixed;
+    if (ok) targets.push(idx);
+  });
+  return targets;
+}
+
+export function applyChoice(state, idx) {
+  if (state.phase !== 'choose' || !choiceTargets(state).includes(idx)) return state;
+  const next = structuredClone(state);
+  const { effect, player } = next.choice;
+  if (effect === 'remove') next.board[idx] = null;
+  else if (effect === 'fix') next.board[idx].fixed = true;
+  else if (effect === 'steal') next.board[idx].color = player;
+  else if (effect === 'plant') next.board[idx] = { color: player, flips: 0, fixed: false };
+  next.choice = null;
+  next.phase = 'play';
+  return finishTurn(next, false);
 }
