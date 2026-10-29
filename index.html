@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>誕生日オセロ</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <main id="app">
+    <section id="setup" class="screen">
+      <h1>誕生日オセロ</h1>
+      <p class="lead">日付を引っぱり合って、自分の誕生日にぴったり止めよう。</p>
+      <form id="setup-form" class="card">
+        <fieldset>
+          <legend>プレイヤー1</legend>
+          <label class="field">名前 <input name="name1" maxlength="10" placeholder="プレイヤー1" autocomplete="off"></label>
+          <div class="field">誕生日
+            <select name="month1" aria-label="プレイヤー1の誕生月"></select>月
+            <select name="day1" aria-label="プレイヤー1の誕生日"></select>日
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>プレイヤー2</legend>
+          <label class="field">名前 <input name="name2" maxlength="10" placeholder="プレイヤー2" autocomplete="off"></label>
+          <div class="field">誕生日
+            <select name="month2" aria-label="プレイヤー2の誕生月"></select>月
+            <select name="day2" aria-label="プレイヤー2の誕生日"></select>日
+          </div>
+        </fieldset>
+        <label class="field">開始日 <input type="date" name="start" required></label>
+        <p id="setup-preview" class="preview" aria-live="polite"></p>
+        <button type="submit" class="primary">対戦開始</button>
+      </form>
+      <button type="button" class="link" data-action="rules">ルールを見る</button>
+    </section>
+
+    <section id="game" class="screen" hidden>
+      <header class="status">
+        <p class="today"><span class="today-label">今日</span><span id="today-date"></span></p>
+        <div class="players">
+          <div id="status-black" class="pl black"></div>
+          <div id="status-white" class="pl white"></div>
+        </div>
+        <p id="turn-msg" class="turn-msg" aria-live="polite"></p>
+      </header>
+      <div id="board" class="board"></div>
+      <div id="adjust" class="adjust card" hidden></div>
+      <footer class="game-footer">
+        <button type="button" class="link" data-action="rules">ルール</button>
+        <button type="button" class="link" data-action="quit">設定に戻る</button>
+      </footer>
+    </section>
+  </main>
+
+  <dialog id="event-dialog" class="card">
+    <p id="event-player" class="event-player"></p>
+    <h2 id="event-title"></h2>
+    <p id="event-text"></p>
+    <form method="dialog"><button value="ok" class="primary">OK</button></form>
+  </dialog>
+
+  <dialog id="result-dialog" class="card">
+    <div class="confetti" aria-hidden="true"></div>
+    <svg class="cake" viewBox="0 0 120 100" aria-hidden="true">
+      <rect x="10" y="88" width="100" height="6" rx="3" fill="#d9c2a6"/>
+      <rect x="20" y="50" width="80" height="40" rx="6" fill="#f6a5c0"/>
+      <rect x="20" y="50" width="80" height="12" rx="6" fill="#fff4e6"/>
+      <rect x="38" y="30" width="6" height="20" fill="#7bdff2"/>
+      <rect x="57" y="30" width="6" height="20" fill="#ffd166"/>
+      <rect x="76" y="30" width="6" height="20" fill="#b8e986"/>
+      <ellipse cx="41" cy="25" rx="3" ry="5" fill="#ff9f1c"/>
+      <ellipse cx="60" cy="25" rx="3" ry="5" fill="#ff9f1c"/>
+      <ellipse cx="79" cy="25" rx="3" ry="5" fill="#ff9f1c"/>
+    </svg>
+    <h2 id="result-title"></h2>
+    <p id="result-reason"></p>
+    <form method="dialog" class="actions">
+      <button value="rematch" class="primary">同じ2人で再戦</button>
+      <button value="setup">設定に戻る</button>
+    </form>
+  </dialog>
+
+  <dialog id="rules-dialog" class="card">
+    <h2>ルール</h2>
+    <ul class="rules">
+      <li>空いているマスならどこにでも置けます。挟んだ相手の石は、普通のオセロと同じく裏返ります。</li>
+      <li>裏返った石の数字(重さ)の合計だけ日付が動きます。黒は過去へ、白は未来へ動かします。</li>
+      <li>石は裏返るたびに重くなります。</li>
+      <li>誕生日を通り越したら、通り越した分だけ跳ね返ります。</li>
+      <li>日付が誕生日にぴったり止まったら、その誕生日の人の勝ちです(どちらが動かしても)。</li>
+      <li>盤面が埋まったら、誕生日までの残り日数が少ない方の勝ち。同じなら石の数で決めます。</li>
+      <li>祝日や行事の日にぴったり止めると、イベントが起きます(1試合に1回ずつ)。</li>
+    </ul>
+    <h3>イベント</h3>
+    <ul id="rules-events" class="rules-events"></ul>
+    <form method="dialog"><button value="ok" class="primary">閉じる</button></form>
+  </dialog>
+</body>
+</html>
