@@ -1,6 +1,9 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, newGame, playMove } from './rules.js';
-import { fillDaySelect, fillMonthSelect, renderGame, renderSetupPreview } from './ui.js';
+import { applyChoice, newGame, playMove, previewMove } from './rules.js';
+import {
+  animateMove, chooseAdjust, fillDaySelect, fillMonthSelect, fillRulesEventList,
+  renderGame, renderSetupPreview, showEventDialog, showResult, showRules,
+} from './ui.js';
 
 const form = document.querySelector('#setup-form');
 const setupScreen = document.querySelector('#setup');
@@ -80,6 +83,12 @@ async function run(task) {
   }
 }
 
+async function finishGame() {
+  const choice = await showResult(state);
+  if (choice === 'rematch') startGame();
+  else backToSetup();
+}
+
 boardEl.addEventListener('click', async (e) => {
   const cell = e.target.closest('.cell');
   if (!cell || busy || !state) return;
@@ -93,14 +102,30 @@ boardEl.addEventListener('click', async (e) => {
     });
   } else if (state.phase === 'play' && !state.board[idx]) {
     await run(async () => {
-      state = playMove(state, idx);
-      renderGame(state);
+      const preview = previewMove(state, idx);
+      let adjust = 0;
+      if (preview.needsAdjust) {
+        adjust = await chooseAdjust(preview.base, state.pending[state.turn], state.turn);
+        if (adjust === null) return;
+      }
+      state = playMove(state, idx, adjust);
+      await animateMove(state);
+      if (state.lastMove.event) {
+        await showEventDialog(state);
+        renderGame(state);
+      }
     });
   }
+  if (state?.phase === 'over') await finishGame();
 });
 
 document.querySelector('[data-action="quit"]').addEventListener('click', () => {
   if (window.confirm('対戦をやめて設定画面に戻りますか?')) backToSetup();
 });
 
+for (const button of document.querySelectorAll('[data-action="rules"]')) {
+  button.addEventListener('click', () => showRules());
+}
+
+fillRulesEventList();
 initSetup();

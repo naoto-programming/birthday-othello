@@ -22,6 +22,13 @@ const chrome = spawn(CHROME, [
   '--remote-allow-origins=*',
   `--user-data-dir=${profile}`,
   '--no-first-run',
+  // headless Chrome は実ウィンドウがなく visibilityState は 'visible' のままでも、
+  // レンダラーのタイマーが数秒でまるごと止まることがある(次のフレームの setTimeout が
+  // 何秒も発火しない)。長い演出(animateMove の日付カウントアップ)の途中で止まると
+  // settled() の待ちがタイムアウトする。バックグラウンド扱いによるタイマー抑制を切る。
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
   'about:blank',
 ], { stdio: 'ignore' });
 
@@ -135,6 +142,67 @@ async function scenarios() {
   await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
   await startFromSetup();
   await shot('pc-game');
+
+  // 4. 日数調整の操作部品
+  const adjust = await js(`(async () => {
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const pending = { double: false, plus3: false, adjust: true, rest: false, reverse: false };
+    const choice = ui.chooseAdjust(5, pending, 'B');
+    const buttons = [...document.querySelectorAll('#adjust .adjust-row button')];
+    const labels = buttons.map((b) => b.textContent);
+    buttons[6].click();
+    return { labels, value: await choice, hidden: document.querySelector('#adjust').hidden };
+  })()`);
+  check(
+    adjust.labels.length === 7 && adjust.labels[0] === '-3(2日)' && adjust.labels[6] === '+3(8日)'
+      && adjust.value === 3 && adjust.hidden,
+    `日数調整の表示か選択がおかしいです: ${JSON.stringify(adjust)}`,
+  );
+
+  // 5. イベント: 10/28 と 11/5(開始 11/1)。黒の1手目で 10/31 ハロウィンに止まる
+  await open(390, 844);
+  await fillSetup({ name: 'たろう', m: 10, d: 28 }, { name: 'はなこ', m: 11, d: 5 });
+  await startFromSetup();
+  await clickCell(19);
+  await settled();
+  check(await js(`document.querySelector('#event-dialog').open`), 'ハロウィンに止まってもイベントのポップアップが出ません');
+  check((await js(`document.querySelector('#event-title').textContent`)).includes('ハロウィン'), 'イベント名がハロウィンではありません');
+  await shot('phone-event');
+  await js(`document.querySelector('#event-dialog button').click()`);
+  await settled();
+  check((await js(`document.querySelector('#status-black').textContent`)).includes('日数2倍'), '黒の次の手に「日数2倍」が表示されていません');
+  for (const idx of [18, 37]) {
+    await clickCell(idx);
+    await settled();
+  }
+  check(await todayText() === '10月31日', `2倍が効いた後の日付が 10月31日 ではありません: ${await todayText()}`);
+
+  // 6. 最後まで打って結果を出し、再戦 → 2回目は Esc 相当で閉じて設定に戻る
+  check(await playToEnd(), '最後まで打っても結果が出ません');
+  const title = await js(`document.querySelector('#result-title').textContent`);
+  check(title.includes('お誕生日おめでとう') || title.includes('引き分け'), `結果の見出しがおかしいです: ${title}`);
+  await shot('phone-result');
+  await js(`document.querySelector('#result-dialog button[value=rematch]').click()`);
+  // close イベントは非同期に届くので、盤面が作り直されるまで待つ
+  await waitFor(`document.querySelectorAll('#board .stone').length === 4`, 3000).catch(() => {});
+  check(await stoneCount() === 4, '再戦で盤面が初期状態になっていません');
+  check(await playToEnd(), '再戦で最後まで打っても結果が出ません');
+  await js(`document.querySelector('#result-dialog').close()`);
+  await waitFor(`!document.querySelector('#setup').hidden`, 2000).catch(() => {});
+  check(await js(`!document.querySelector('#setup').hidden`), 'ボタン以外で結果を閉じたとき設定画面に戻りません(前回の再戦が残っています)');
+
+  // 7. 半年離れた誕生日で最後まで(大きな移動と演出の上限)
+  await open(320, 640);
+  await fillSetup({ name: 'あいうえおかきくけこ', m: 1, d: 1 }, { name: 'さしすせそたちつてと', m: 7, d: 1 });
+  await startFromSetup();
+  check(await playToEnd(), '半年離れた誕生日で最後まで打っても結果が出ません');
+  await shot('small-result');
+
+  // 8. ルール画面
+  await js(`document.querySelector('#result-dialog button[value=setup]').click()`);
+  await js(`document.querySelector('#setup [data-action="rules"]').click()`);
+  check(await js(`document.querySelectorAll('#rules-events li').length`) === 23, 'ルール画面のイベント一覧が23件ではありません');
+  await shot('small-rules');
 }
 
 // ---- 操作の部品 ----
@@ -220,4 +288,22 @@ async function shot(name) {
 
 function check(ok, message) {
   if (!ok) failures.push(message);
+}
+
+// 決着がつくまで打つ。ポップアップ・日数調整・選択は最初の選択肢で進める。
+async function playToEnd() {
+  for (let step = 0; step < 400; step++) {
+    if (await js(`document.querySelector('#result-dialog').open`)) return true;
+    if (await js(`document.querySelector('#event-dialog').open`)) {
+      await js(`document.querySelector('#event-dialog button').click()`);
+    } else if (await js(`!document.querySelector('#adjust').hidden`)) {
+      await js(`document.querySelector('#adjust .adjust-row button').click()`);
+    } else if (await js(`document.querySelector('#board .cell.target') !== null`)) {
+      await js(`document.querySelector('#board .cell.target').click()`);
+    } else {
+      await js(`document.querySelector('#board .cell:not(.has-stone)').click()`);
+    }
+    await settled();
+  }
+  return false;
 }

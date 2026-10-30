@@ -1,6 +1,8 @@
 import { boardDates, formatMD, fromDayNum } from './dates.js';
-import { choiceTargets, stoneWeight } from './rules.js';
-import { EFFECTS } from './events.js';
+import { choiceTargets, countStones, moveDays, reflect, stoneWeight } from './rules.js';
+import { EFFECTS, EVENTS, ruleLabel } from './events.js';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const $ = (selector) => document.querySelector(selector);
 const COLOR_NAME = { B: '黒', W: '白' };
@@ -122,4 +124,140 @@ function renderBoard(state, today) {
     return cell;
   });
   $('#board').replaceChildren(...cells);
+}
+
+// ---- ダイアログ ----
+
+// returnValue を毎回空に戻す。Esc などボタン以外で閉じたときに、前回の選択が残らないようにするため。
+function openDialog(dialog) {
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true });
+  });
+}
+
+export function showEventDialog(state) {
+  const { event, fizzled, warpTo, color } = state.lastMove;
+  $('#event-player').textContent = `${playerOf(state, color).name}に発動!`;
+  $('#event-title').textContent = `${formatMD(event.day)} ${event.occasion}「${event.name}」`;
+  let text = EFFECTS[event.effect].text;
+  if (warpTo !== undefined) text += `(${formatMD(dateOf(state, warpTo))}へ)`;
+  if (fizzled) text += '。選べる対象がないので不発でした';
+  $('#event-text').textContent = text;
+  return openDialog($('#event-dialog'));
+}
+
+export function showRules() {
+  return openDialog($('#rules-dialog'));
+}
+
+export function fillRulesEventList() {
+  const items = EVENTS.map((ev) => {
+    const li = document.createElement('li');
+    li.textContent = `${ruleLabel(ev.rule)} ${ev.occasion}「${ev.name}」: ${EFFECTS[ev.effect].text}`;
+    return li;
+  });
+  $('#rules-events').replaceChildren(...items);
+}
+
+export function showResult(state) {
+  const dialog = $('#result-dialog');
+  const winner = state.result.winner ? playerOf(state, state.result.winner) : null;
+  $('#result-title').textContent = winner ? `お誕生日おめでとう、${winner.name}!` : '引き分け';
+  $('#result-reason').textContent = resultReason(state);
+  dialog.classList.toggle('draw', !winner);
+  const confetti = dialog.querySelector('.confetti');
+  confetti.replaceChildren();
+  if (winner) launchConfetti(confetti);
+  return openDialog(dialog);
+}
+
+function resultReason(state) {
+  const { result, match } = state;
+  if (result.reason === 'birthday') {
+    const winner = playerOf(state, result.winner);
+    return `日付が${formatMD(winner.day)}(${winner.name}の誕生日)にぴったり止まりました。`;
+  }
+  const left = `誕生日まで ${match.black.name} あと${state.p}日、${match.white.name} あと${match.D - state.p}日`;
+  if (state.p !== match.D - state.p) return `盤面が埋まりました。${left}。`;
+  const stones = countStones(state);
+  const count = `石の数は ${match.black.name} ${stones.B}個、${match.white.name} ${stones.W}個`;
+  return result.winner
+    ? `盤面が埋まりました。${left}で同じなので、石の数で決めました(${count})。`
+    : `盤面が埋まりました。${left}で同じ、${count}で同じでした。`;
+}
+
+function launchConfetti(container) {
+  const colors = ['#f6a5c0', '#ffd166', '#7bdff2', '#b8e986', '#c3a6ff'];
+  for (let i = 0; i < 40; i++) {
+    const piece = document.createElement('span');
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.animationDelay = `${Math.random() * 0.8}s`;
+    piece.style.animationDuration = `${1.8 + Math.random() * 1.2}s`;
+    container.append(piece);
+  }
+}
+
+// ---- 日数調整 ----
+
+// −3〜+3 のボタンを出し、選んだ値を返す。「別のマスにする」なら null。
+export function chooseAdjust(base, pending, color) {
+  const panel = $('#adjust');
+  const row = document.createElement('div');
+  row.className = 'adjust-row';
+  panel.replaceChildren(span('adjust-title', '日数調整: 動く日数を選んでください'), row);
+  panel.hidden = false;
+  return new Promise((resolve) => {
+    const finish = (value) => {
+      panel.hidden = true;
+      resolve(value);
+    };
+    for (let a = -3; a <= 3; a++) {
+      const { days } = moveDays(base, pending, color, a);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `${a > 0 ? '+' : ''}${a}(${days}日)`;
+      button.addEventListener('click', () => finish(a));
+      row.append(button);
+    }
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'link';
+    cancel.textContent = '別のマスにする';
+    cancel.addEventListener('click', () => finish(null));
+    panel.append(cancel);
+  });
+}
+
+// ---- 演出 ----
+
+// 置いた石と裏返った石を動かしてから、日付を1日ずつ数えるように動かす(最大1.5秒程度)
+export async function animateMove(state) {
+  const move = state.lastMove;
+  renderGame(state, { shownP: move.fromP });
+  for (const idx of [move.idx, ...move.flips]) {
+    $(`#board .cell[data-idx="${idx}"] .stone`)?.classList.add(idx === move.idx ? 'placed' : 'flip');
+  }
+  await sleep(350);
+  if (move.days > 0) {
+    const frames = Math.min(move.days, 30);
+    const frameMs = Math.min(80, 1500 / frames);
+    let bounced = false;
+    for (let f = 1; f <= frames; f++) {
+      const raw = move.fromP + move.dir * Math.round((f * move.days) / frames);
+      bounced ||= raw < 0 || raw > state.match.D;
+      showDate(state, reflect(raw, state.match.D), bounced);
+      await sleep(frameMs);
+    }
+  }
+  renderGame(state);
+}
+
+function showDate(state, p, bounced) {
+  $('#today-date').textContent = formatLong(dateOf(state, p));
+  $('#status-black .pl-left').textContent = `あと${p}日`;
+  $('#status-white .pl-left').textContent = `あと${state.match.D - p}日`;
+  if (bounced) $('#turn-msg').textContent = '跳ね返り!';
 }
