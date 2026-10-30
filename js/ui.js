@@ -105,7 +105,7 @@ function renderBoard(state, today) {
     cell.dataset.idx = String(idx);
     const { d } = fromDayNum(day);
     cell.append(span('date', idx === 0 || d === 1 ? formatMD(day) : String(d)));
-    if (day === today) cell.classList.add('today');
+    if (day === today) cell.classList.add('is-today');
     if (day === match.black.day) cell.classList.add('bday-black');
     if (day === match.white.day) cell.classList.add('bday-white');
     const ev = eventByDay.get(day);
@@ -149,7 +149,11 @@ export function showEventDialog(state) {
 }
 
 export function showRules() {
-  return openDialog($('#rules-dialog'));
+  const dialog = $('#rules-dialog');
+  const closed = openDialog(dialog);
+  // showModal() が「閉じる」ボタンへフォーカスを移し、スクロール位置をそこまで動かしてしまうため戻す
+  dialog.scrollTop = 0;
+  return closed;
 }
 
 export function fillRulesEventList() {
@@ -202,18 +206,29 @@ function launchConfetti(container) {
 
 // ---- 日数調整 ----
 
+// 表示中の日数調整パネルを外から打ち切るための状態(中断時に main.js から呼ぶ)
+let activeAdjust = null;
+
 // −3〜+3 のボタンを出し、選んだ値を返す。「別のマスにする」なら null。
-export function chooseAdjust(base, pending, color) {
+export function chooseAdjust(base, pending, color, idx) {
   const panel = $('#adjust');
+  const cell = idx === undefined ? null : $(`#board .cell[data-idx="${idx}"]`);
+  const turnMsg = $('#turn-msg');
+  const prevTurnMsg = turnMsg.textContent;
+  cell?.classList.add('target');
+  turnMsg.textContent = `${COLOR_NAME[color]}: 日数調整 ー 動く日数を選んでください`;
   const row = document.createElement('div');
   row.className = 'adjust-row';
   panel.replaceChildren(span('adjust-title', '日数調整: 動く日数を選んでください'), row);
-  panel.hidden = false;
   return new Promise((resolve) => {
     const finish = (value) => {
       panel.hidden = true;
+      cell?.classList.remove('target');
+      turnMsg.textContent = prevTurnMsg;
+      activeAdjust = null;
       resolve(value);
     };
+    activeAdjust = { finish };
     for (let a = -3; a <= 3; a++) {
       const { days } = moveDays(base, pending, color, a);
       const button = document.createElement('button');
@@ -228,31 +243,49 @@ export function chooseAdjust(base, pending, color) {
     cancel.textContent = '別のマスにする';
     cancel.addEventListener('click', () => finish(null));
     panel.append(cancel);
+    // 中身(ボタン)を全部入れ終えた、最終的な高さでスクロール位置を決める
+    panel.hidden = false;
+    panel.scrollIntoView({ block: 'nearest' });
   });
+}
+
+// 表示中の日数調整パネルがあれば null で打ち切り、パネルを隠す。対戦の中断時に main.js から呼ぶ。
+export function cancelAdjust() {
+  if (!activeAdjust) return false;
+  activeAdjust.finish(null);
+  return true;
 }
 
 // ---- 演出 ----
 
 // 置いた石と裏返った石を動かしてから、日付を1日ずつ数えるように動かす(最大1.5秒程度)
-export async function animateMove(state) {
+// isCurrent: 呼び出し側の対戦がまだ有効かどうか。中断されていたら残りの演出と最後の再描画を打ち切る。
+export async function animateMove(state, { isCurrent = () => true } = {}) {
   const move = state.lastMove;
   renderGame(state, { shownP: move.fromP });
   for (const idx of [move.idx, ...move.flips]) {
     $(`#board .cell[data-idx="${idx}"] .stone`)?.classList.add(idx === move.idx ? 'placed' : 'flip');
   }
   await sleep(350);
+  if (!isCurrent()) return;
+  let bounced = false;
   if (move.days > 0) {
     const frames = Math.min(move.days, 30);
     const frameMs = Math.min(80, 1500 / frames);
-    let bounced = false;
     for (let f = 1; f <= frames; f++) {
+      if (!isCurrent()) return;
       const raw = move.fromP + move.dir * Math.round((f * move.days) / frames);
       bounced ||= raw < 0 || raw > state.match.D;
       showDate(state, reflect(raw, state.match.D), bounced);
       await sleep(frameMs);
     }
+    // 跳ね返りメッセージが一瞬で消えないよう、少し長めに見せておく
+    if (bounced) await sleep(550);
   }
-  renderGame(state);
+  if (!isCurrent()) return;
+  // 「真ん中へ」などで日付が飛んだ場合も、着地した日付のまま止める。
+  // 飛んだ先はイベントのポップアップが閉じたあと(main.js の再描画)で表示する。
+  renderGame(state, { shownP: move.toP });
 }
 
 function showDate(state, p, bounced) {
