@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { request as httpRequest } from 'node:http';
 import { startServer } from './serve.mjs';
 
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -64,10 +65,15 @@ try {
     if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
       pageErrors.push(msg.params.args.map((a) => a.value ?? a.description).join(' '));
     }
+    // confirm() などのダイアログは既定では止まってしまうので、自動で「OK」を押す
+    if (msg.method === 'Page.javascriptDialogOpening') send('Page.handleJavaScriptDialog', { accept: true });
   };
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Log.enable');
+  // JS の変更をすぐ反映できるよう、常にキャッシュを無効化する
+  await send('Network.enable');
+  await send('Network.setCacheDisabled', { cacheDisabled: true });
   mkdirSync(OUT, { recursive: true });
   await scenarios();
 } catch (err) {
@@ -202,7 +208,87 @@ async function scenarios() {
   await js(`document.querySelector('#result-dialog button[value=setup]').click()`);
   await js(`document.querySelector('#setup [data-action="rules"]').click()`);
   check(await js(`document.querySelectorAll('#rules-events li').length`) === 23, 'ルール画面のイベント一覧が23件ではありません');
+  check(await js(`document.querySelector('#rules-dialog').scrollTop`) === 0, 'ルールダイアログが先頭にスクロールしていません');
   await shot('small-rules');
+
+  // 9. 日数調整パネルの表示位置と、調整待ち中に中断したときの後始末
+  // 誕生日 11/1・11/7 → D=6, s=1, 既定開始日 11/4(p=3)。黒の1手目(idx19)が11/3(文化の日・調整)に止まり、
+  // 黒の次の手に調整が効く。白(idx18)で11/5。黒の次(idx37, base=1)で調整パネルが出る。
+  await open(375, 553);
+  await fillSetup({ name: 'くろ', m: 11, d: 1 }, { name: 'しろ', m: 11, d: 7 });
+  await startFromSetup();
+  await clickCell(19);
+  await settled();
+  check(await js(`document.querySelector('#event-dialog').open`), '文化の日のイベントが発動しません');
+  await js(`document.querySelector('#event-dialog button').click()`);
+  await settled();
+  await clickCell(18);
+  await settled();
+  await clickCell(37);
+  await waitFor(`!document.querySelector('#adjust').hidden`);
+  const adjustRect = await js(`(() => {
+    const r = document.querySelector('#adjust').getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom };
+  })()`);
+  check(
+    adjustRect.top >= 0 && adjustRect.bottom <= 553,
+    `日数調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(adjustRect)}`,
+  );
+  await shot('adjust-visible');
+
+  // I1(a): 調整待ち中に「設定に戻る」で中断しても、次の対戦に影響が残らない
+  await js(`document.querySelector('[data-action="quit"]').click()`);
+  await waitFor(`!document.querySelector('#setup').hidden`);
+  check(await js(`document.body.dataset.busy`) === '0', '調整待ち中に中断しても busy が 0 に戻りません');
+  check(await js(`document.querySelector('#adjust').hidden`), '調整待ち中に中断しても調整パネルが隠れません');
+  await startFromSetup();
+  check(await stoneCount() === 4, '調整待ち中に中断した後の新しい対戦が初期状態(4石)になっていません');
+  await clickCell(20);
+  await settled();
+  check(await stoneCount() === 5, '調整待ち中に中断した後、新しい対戦で盤面タップが効きません');
+
+  // 10. 演出中に「設定に戻る」で中断し、演出が終わる前に新しい対戦を始めても上書きされない
+  await open(400, 700);
+  await fillSetup({ name: 'アニメ太郎', m: 3, d: 1 }, { name: 'アニメ花子', m: 9, d: 1 });
+  await startFromSetup();
+  await clickCell(19);
+  await js(`(() => {
+    document.querySelector('[data-action="quit"]').click();
+    document.querySelector('#setup-form button[type=submit]').click();
+  })()`);
+  await waitFor(`!document.querySelector('#game').hidden`);
+  await sleep(1000);
+  check(await stoneCount() === 4, '演出中に中断して新しい対戦を始めても、盤面が上書きされます');
+  check(
+    await js(`document.querySelector('#status-black').classList.contains('active')`),
+    '演出中に中断して新しい対戦を始めても、黒の番になっていません',
+  );
+  check(await noHorizontalScroll(), '演出中断からの新しい対戦画面が横にスクロールします');
+
+  // 11. (任意) 開発サーバーが壊れたURLでも落ちずに400を返す
+  await checkServerRobustness();
+}
+
+// 壊れたURLを送っても dev サーバーが落ちず、400を返して配信を続けられることを確かめる(任意項目)
+async function checkServerRobustness() {
+  if (process.env.SMOKE_URL) return; // 自前のサーバーを使っていないときは対象外
+  const malformed = await rawGet('/%E0%A4%A').catch((err) => `error:${err.code ?? err.message}`);
+  check(malformed === 400, `壊れたURL(不正なパーセントエンコーディング)で400を返しません: ${malformed}`);
+  const doubleSlash = await rawGet('//').catch((err) => `error:${err.code ?? err.message}`);
+  check(doubleSlash === 400, `壊れたURL(空のホストになるパス)で400を返しません: ${doubleSlash}`);
+  const stillOk = await rawGet('/index.html').catch((err) => `error:${err.code ?? err.message}`);
+  check(stillOk === 200, `壊れたURLの後にサーバーが配信を続けられません: ${stillOk}`);
+}
+
+function rawGet(path) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port: APP_PORT, path, method: 'GET' }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 // ---- 操作の部品 ----
