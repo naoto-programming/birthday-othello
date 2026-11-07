@@ -319,17 +319,24 @@ export async function animateMove(state, { isCurrent = () => true } = {}) {
   renderGame(state, { shownP: move.toP });
 }
 
-// 今日の光をカレンダーの上で1マスずつ動かす(最大1.5秒程度)。
-// 月が変わるときはカレンダーをめくり、誕生日で跳ね返るときは誕生日のマスを弾ませる。
+// 今日の光をカレンダーの上で1マスずつ動かす。
+// 月が変わるときはカレンダーをめくり、誕生日で跳ね返るときは誕生日のマスを弾ませるが、
+// 合計はおよそ1.5秒におさまるように、先に経路を計算してからページめくり・跳ね返りの分を差し引いて1コマの時間を決める。
+const TURN_MS = 250;
+const BOUNCE_MS = 200;
+const HOLD_MS = 300;
+const DATE_ANIM_BUDGET_MS = 1500;
+
 async function animateDate(state, fromP, dir, days, { isCurrent }) {
   if (days <= 0) return;
   const { N } = state.match;
   const frames = Math.min(days, 30);
-  const frameMs = Math.min(80, 1500 / frames);
-  let bounced = false;
   let month = fromDayNum(dateOf(state, fromP)).m;
+  // 経路を先に計算し、月が変わる回数と跳ね返りの有無を数える
+  const path = [];
+  let bounced = false;
+  let turns = 0;
   for (let f = 1; f <= frames; f++) {
-    if (!isCurrent()) return;
     const raw = fromP + dir * Math.round((f * days) / frames);
     const p = reflect(raw, N);
     const hit = !bounced && (raw < 0 || raw > N);
@@ -337,25 +344,43 @@ async function animateDate(state, fromP, dir, days, { isCurrent }) {
     const m = fromDayNum(dateOf(state, p)).m;
     if (m !== month) {
       month = m;
-      await turnPage();
+      turns += 1;
+    }
+    path.push({ raw, p, hit });
+  }
+  const extras = turns * TURN_MS + (bounced ? BOUNCE_MS + HOLD_MS : 0);
+  const frameMs = Math.max(15, Math.min(80, (DATE_ANIM_BUDGET_MS - extras) / frames));
+  month = fromDayNum(dateOf(state, fromP)).m;
+  let bouncedSoFar = false;
+  for (const { raw, p, hit } of path) {
+    if (!isCurrent()) return;
+    const m = fromDayNum(dateOf(state, p)).m;
+    if (m !== month) {
+      month = m;
+      await turnPage(TURN_MS);
       if (!isCurrent()) return;
     }
     renderGame(state, { shownP: p });
-    if (bounced) $('#turn-msg').textContent = '跳ね返り!';
+    bouncedSoFar ||= hit;
+    if (bouncedSoFar) $('#turn-msg').textContent = '跳ね返り!';
     if (hit) {
       $(`#board .cell.bday-${raw < 0 ? 'black' : 'white'}`)?.classList.add('bounce');
-      await wait(250);
+      await wait(BOUNCE_MS);
+      if (!isCurrent()) return;
     }
     await wait(frameMs);
+    if (!isCurrent()) return;
   }
-  if (bounced) await wait(550);
+  if (bounced) {
+    await wait(HOLD_MS);
+  }
 }
 
 // 月が変わるとき、カレンダーをめくる
-async function turnPage() {
+async function turnPage(ms) {
   const board = $('#board');
   board.classList.add('page-turn');
-  await wait(320);
+  await wait(ms);
   board.classList.remove('page-turn');
 }
 

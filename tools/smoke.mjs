@@ -297,6 +297,13 @@ async function scenarios() {
   await settled();
   const elapsed = Date.now() - t0;
   check(elapsed < 300, `動きを減らす設定でも、打ってから更新まで ${elapsed}ms かかっています`);
+  // 動きを減らす設定では celebrate() も花火を出さない
+  const noFireworks = await js(`(async () => {
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    await ui.celebrate({ result: { winner: 'B' } });
+    return document.querySelector('.fireworks') === null;
+  })()`);
+  check(noFireworks, '動きを減らす設定でも celebrate() が花火を出しています');
   await send('Emulation.setEmulatedMedia', { features: [] });
 
   // 13. 返す石は置いたマスに近い順に1枚ずつ返る(6/1 と 6/20。間にイベントがない)。勝利の花火が出て消える
@@ -320,6 +327,59 @@ async function scenarios() {
     return { during, after: document.querySelector('.fireworks') !== null };
   })()`);
   check(fireworks.during && !fireworks.after, `花火が出ないか、消えません: ${JSON.stringify(fireworks)}`);
+
+  // 14. 日付演出(月またぎ+跳ね返り)の合計がおよそ1.5秒におさまる(石を返す演出は含まない animateDate 単体ではなく、
+  // 実際に main.js が呼ぶ animateMove 全体で測る。間 50日・25マスの対戦で、黒が5枚(各重さ3=重さの合計15)を
+  // 一気に返して11月3日→10月24日まで動き、10/14(黒の誕生日)の手前で跳ね返りつつ11月→10月の月またぎも起きる)
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 10, d: 14 }, { name: 'しろ', m: 12, d: 3 });
+  await startFromSetup();
+  const dateAnimMs = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'くろ', birthday: { m: 10, d: 14 } }, { name: 'しろ', birthday: { m: 12, d: 3 } }],
+      dates.dayNum(2026, 11, 3),
+    );
+    let st = rules.newGame(match);
+    st = { ...st, board: st.board.slice() };
+    st.board[30] = { color: 'B', flips: 0 };
+    for (const i of [25, 26, 27, 28, 29]) st.board[i] = { color: 'W', flips: 2 };
+    st.turn = 'B';
+    const next = rules.playMove(st, 24);
+    const t0 = performance.now();
+    await ui.animateMove(next);
+    return performance.now() - t0;
+  })()`);
+  // 実測: 修正前(ページめくり・跳ね返り待ちが1.5秒の枠の外に積み増しされていた)は約3460ms、
+  // 修正後(枠の中にページめくり・跳ね返りの分も含めて配分する)は約2640msで安定している。
+  // どちらとも明確に離れた 3000ms をしきい値にする(石を返す演出 約1100ms を含む)。
+  check(dateAnimMs < 3000, `日付が動く演出(月またぎ+跳ね返り)が長すぎます: ${dateAnimMs}ms`);
+
+  // 15. 勝利の花火が流れている間に「設定に戻る」で中断しても、古い対戦の結果ダイアログを開こうとしてエラーにならない
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 10, d: 28 }, { name: 'しろ', m: 10, d: 30 });
+  await js(`(() => {
+    const f = document.querySelector('#setup-form');
+    f.start.value = '2026-10-29';
+    f.start.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await startFromSetup();
+  await playCell(27);
+  await playCell(28);
+  await tapCell(29);
+  await tapCell(29);
+  await waitFor(`document.querySelector('.board-wrap .fireworks') !== null`);
+  const errorsBeforeQuit = pageErrors.length;
+  await js(`document.querySelector('[data-action="quit"]').click()`);
+  await sleep(2000);
+  check(await js(`!document.querySelector('#setup').hidden`), '花火の演出中に中断しても設定画面に戻りません');
+  check(!(await js(`document.querySelector('#result-dialog').open`)), '花火の演出中に中断したのに結果ダイアログが開いています');
+  check(
+    pageErrors.length === errorsBeforeQuit,
+    `花火の演出中に中断するとページのエラーが発生します: ${JSON.stringify(pageErrors.slice(errorsBeforeQuit))}`,
+  );
 
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();

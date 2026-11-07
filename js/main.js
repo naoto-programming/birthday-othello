@@ -97,9 +97,15 @@ function showPick() {
   renderGame(state, { preview: pick ? previewMove(state, pick.idx, pick) : null });
 }
 
-async function finishGame() {
-  await celebrate(state);
-  const choice = await showResult(state);
+// finished: 終局した対戦の状態をその場で受け取る(グローバルな state を読み直さない)。
+// isCurrent: 呼び出し側から引き継いだ、対戦がまだ有効かどうかの判定。
+// celebrate() の花火が流れている間や結果ダイアログが開いている間に「設定に戻る」で中断されたら、
+// 古くなった対戦に対して showResult や再戦・設定に戻るを行わない。
+async function finishGame(finished, isCurrent) {
+  await celebrate(finished);
+  if (!isCurrent()) return;
+  const choice = await showResult(finished);
+  if (!isCurrent()) return;
   if (choice === 'rematch') startGame();
   else backToSetup();
 }
@@ -126,7 +132,7 @@ async function confirmPick() {
     renderGame(local);
     highlightEffect(local);
   });
-  if (isCurrent() && local.phase === 'over') await finishGame();
+  if (isCurrent() && local.phase === 'over') await finishGame(local, isCurrent);
 }
 
 // 選ぶ効果(鬼は外・固定・奪う・植える)の対象を決める
@@ -140,7 +146,7 @@ async function choose(idx) {
     state = next;
     await animateChoice(prev, next, idx, { isCurrent });
   });
-  if (isCurrent() && next.phase === 'over') await finishGame();
+  if (isCurrent() && next.phase === 'over') await finishGame(next, isCurrent);
 }
 
 async function tapCell(idx) {
