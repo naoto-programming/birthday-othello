@@ -299,6 +299,28 @@ async function scenarios() {
   check(elapsed < 300, `動きを減らす設定でも、打ってから更新まで ${elapsed}ms かかっています`);
   await send('Emulation.setEmulatedMedia', { features: [] });
 
+  // 13. 返す石は置いたマスに近い順に1枚ずつ返る(6/1 と 6/20。間にイベントがない)。勝利の花火が出て消える
+  await open(390, 844);
+  await fillSetup({ name: 'れつ', m: 6, d: 1 }, { name: 'えらび', m: 6, d: 20 });
+  await startFromSetup();
+  for (const idx of [27, 28, 45, 37]) await playCell(idx);
+  await tapCell(29);
+  const delays = await js(`(() => {
+    document.querySelector('#board .cell[data-idx="29"]').click();
+    return [...document.querySelectorAll('#board .stone.flip-to-black')].map((s) => s.style.animationDelay);
+  })()`);
+  check(delays.length === 2 && new Set(delays).size === 2, `返す石が順番に返っていません: ${JSON.stringify(delays)}`);
+  await shot('phone-flip');
+  await settled();
+  const fireworks = await js(`(async () => {
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const done = ui.celebrate({ result: { winner: 'B' } });
+    const during = document.querySelector('.board-wrap .fireworks') !== null;
+    await done;
+    return { during, after: document.querySelector('.fireworks') !== null };
+  })()`);
+  check(fireworks.during && !fireworks.after, `花火が出ないか、消えません: ${JSON.stringify(fireworks)}`);
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
@@ -399,8 +421,11 @@ async function playCell(idx) {
   await tapCell(idx);
   await settled();
 }
+// busy が外れても、勝利の花火(celebrate)はダイアログを開く前に演出が続くことがあるので、それも終わるまで待つ
 function settled() {
-  return waitFor(`document.body.dataset.busy !== '1' || document.querySelector('dialog[open]')`);
+  return waitFor(
+    `(document.body.dataset.busy !== '1' && !document.querySelector('.board-wrap .fireworks')) || document.querySelector('dialog[open]')`,
+  );
 }
 function stoneCount() { return js(`document.querySelectorAll('#board .stone:not(.ghost)').length`); }
 function todayText() { return js(`document.querySelector('#today-date').textContent`); }

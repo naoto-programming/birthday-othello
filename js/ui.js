@@ -286,7 +286,7 @@ function resultReason(state) {
 
 function launchConfetti(container) {
   const colors = ['#f6a5c0', '#ffd166', '#7bdff2', '#b8e986', '#c3a6ff'];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 80; i++) {
     const piece = document.createElement('span');
     piece.style.left = `${Math.random() * 100}%`;
     piece.style.background = colors[i % colors.length];
@@ -298,15 +298,20 @@ function launchConfetti(container) {
 
 // ---- 演出 ----
 
-// 置いた石と裏返った石を動かしてから、今日の光を1マスずつ動かす。
+// 置いた石を落とし、置いたマスに近い石から1枚ずつ返してから、今日の光を1マスずつ動かす。
 // isCurrent: 呼び出し側の対戦がまだ有効かどうか。中断されていたら残りの演出と最後の再描画を打ち切る。
 export async function animateMove(state, { isCurrent = () => true } = {}) {
   const move = state.lastMove;
   renderGame(state, { shownP: move.fromP });
-  for (const idx of [move.idx, ...move.flips]) {
-    $(`#board .cell[data-idx="${idx}"] .stone`)?.classList.add(idx === move.idx ? 'placed' : 'flip');
-  }
-  await wait(350);
+  $(`#board .cell[data-idx="${move.idx}"] .stone`)?.classList.add('placed');
+  const order = [...move.flips].sort((a, b) => cellDistance(a, move.idx) - cellDistance(b, move.idx));
+  order.forEach((idx, i) => {
+    const stone = $(`#board .cell[data-idx="${idx}"] .stone`);
+    if (!stone) return;
+    stone.classList.add(move.color === 'B' ? 'flip-to-black' : 'flip-to-white');
+    stone.style.animationDelay = `${300 + i * 80}ms`;
+  });
+  await wait(order.length ? 300 + order.length * 80 + 400 : 450);
   if (!isCurrent()) return;
   await animateDate(state, move.fromP, move.dir, move.days, { isCurrent });
   if (!isCurrent()) return;
@@ -314,36 +319,116 @@ export async function animateMove(state, { isCurrent = () => true } = {}) {
   renderGame(state, { shownP: move.toP });
 }
 
-// 今日の光をカレンダーの上で1マスずつ動かす(最大1.5秒程度)
+// 今日の光をカレンダーの上で1マスずつ動かす(最大1.5秒程度)。
+// 月が変わるときはカレンダーをめくり、誕生日で跳ね返るときは誕生日のマスを弾ませる。
 async function animateDate(state, fromP, dir, days, { isCurrent }) {
   if (days <= 0) return;
   const { N } = state.match;
   const frames = Math.min(days, 30);
   const frameMs = Math.min(80, 1500 / frames);
   let bounced = false;
+  let month = fromDayNum(dateOf(state, fromP)).m;
   for (let f = 1; f <= frames; f++) {
     if (!isCurrent()) return;
     const raw = fromP + dir * Math.round((f * days) / frames);
-    bounced ||= raw < 0 || raw > N;
-    renderGame(state, { shownP: reflect(raw, N) });
+    const p = reflect(raw, N);
+    const hit = !bounced && (raw < 0 || raw > N);
+    bounced ||= hit;
+    const m = fromDayNum(dateOf(state, p)).m;
+    if (m !== month) {
+      month = m;
+      await turnPage();
+      if (!isCurrent()) return;
+    }
+    renderGame(state, { shownP: p });
     if (bounced) $('#turn-msg').textContent = '跳ね返り!';
+    if (hit) {
+      $(`#board .cell.bday-${raw < 0 ? 'black' : 'white'}`)?.classList.add('bounce');
+      await wait(250);
+    }
     await wait(frameMs);
   }
   if (bounced) await wait(550);
 }
 
-// 選ぶ効果(鬼は外・固定・奪う・植える)の結果を表示する
-export async function animateChoice(prev, next, idx, { isCurrent = () => true } = {}) {
-  if (isCurrent()) renderGame(next);
+// 月が変わるとき、カレンダーをめくる
+async function turnPage() {
+  const board = $('#board');
+  board.classList.add('page-turn');
+  await wait(320);
+  board.classList.remove('page-turn');
 }
 
-// 「真ん中へ」で飛んだ先を表示する
+// 選ぶ効果の演出: 鬼は外は消える、固定は金色に光る、奪うは裏返る、植えるは落ちてくる
+export async function animateChoice(prev, next, idx, { isCurrent = () => true } = {}) {
+  const { effect } = prev.choice;
+  if (effect === 'remove') {
+    $(`#board .cell[data-idx="${idx}"] .stone`)?.classList.add('vanish');
+    await wait(400);
+    if (!isCurrent()) return;
+  }
+  renderGame(next);
+  const stone = $(`#board .cell[data-idx="${idx}"] .stone`);
+  if (effect === 'fix') stone?.classList.add('glow-gold');
+  if (effect === 'steal') stone?.classList.add(next.board[idx].color === 'B' ? 'flip-to-black' : 'flip-to-white');
+  if (effect === 'plant') stone?.classList.add('placed');
+  await wait(500);
+}
+
+// 「真ん中へ」で飛んだ先まで、今日の光を動かす
 export async function animateWarp(state, { isCurrent = () => true } = {}) {
-  if (isCurrent()) renderGame(state);
+  const { toP, warpTo } = state.lastMove;
+  await animateDate(state, toP, Math.sign(warpTo - toP), Math.abs(warpTo - toP), { isCurrent });
+}
+
+function glowOnce(el, className) {
+  if (!el) return;
+  el.classList.remove(className);
+  void el.offsetWidth; // 同じ演出をもう一度最初から始めるため
+  el.classList.add(className);
+  el.addEventListener('animationend', () => el.classList.remove(className), { once: true });
 }
 
 // 効果が働いた名札や石を光らせる
-export function highlightEffect() {}
+export function highlightEffect(state) {
+  const effect = state.lastMove?.event?.effect;
+  if (!effect) return;
+  const mover = state.lastMove.color;
+  const target = ['rest', 'reverse'].includes(effect) ? (mover === 'B' ? 'W' : 'B') : mover;
+  if (['double', 'plus3', 'adjust', 'rest', 'reverse', 'extraTurn'].includes(effect)) {
+    glowOnce($(`#status-${target === 'B' ? 'black' : 'white'}`), 'glow');
+  }
+  if (effect === 'resetWeights') {
+    for (const stone of document.querySelectorAll('#board .stone')) glowOnce(stone, 'glow-gold');
+  }
+}
 
-// 勝利の演出(結果のダイアログを開く前)
-export async function celebrate() {}
+// 勝った人の誕生日のマス(盤面になければ盤面の中央)から花火を上げる
+export async function celebrate(state) {
+  if (!state.result?.winner || reducedMotion()) return;
+  const wrap = $('.board-wrap');
+  const area = wrap.getBoundingClientRect();
+  const cell = $(`#board .cell.bday-${state.result.winner === 'B' ? 'black' : 'white'}`)?.getBoundingClientRect();
+  const x = cell ? cell.left + cell.width / 2 - area.left : area.width / 2;
+  const y = cell ? cell.top + cell.height / 2 - area.top : area.height / 2;
+  const layer = document.createElement('div');
+  layer.className = 'fireworks';
+  const colors = ['#f6a5c0', '#ffd166', '#7bdff2', '#b8e986', '#c3a6ff', '#ff9f1c'];
+  for (let burst = 0; burst < 3; burst++) {
+    for (let i = 0; i < 16; i++) {
+      const spark = document.createElement('span');
+      const angle = (2 * Math.PI * i) / 16;
+      const radius = 50 + Math.random() * 40;
+      spark.style.left = `${x}px`;
+      spark.style.top = `${y - burst * 25}px`;
+      spark.style.setProperty('--dx', `${Math.cos(angle) * radius}px`);
+      spark.style.setProperty('--dy', `${Math.sin(angle) * radius}px`);
+      spark.style.background = colors[(i + burst) % colors.length];
+      spark.style.animationDelay = `${burst * 280}ms`;
+      layer.append(spark);
+    }
+  }
+  wrap.append(layer);
+  await sleep(1500);
+  layer.remove();
+}
