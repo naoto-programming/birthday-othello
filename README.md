@@ -12,8 +12,9 @@
 npm test          # ルール・日付・祝日の単体テスト(Node.js v23 以降)
 npm run serve     # http://localhost:8000/ で配信
 npm run smoke     # ヘッドレス Chrome で画面を操作して確認(Google Chrome が必要)
+npm run balance   # 本物のルールでAI同士を対戦させ、バランスを確かめる
 ```
 
-Mac がスリープすると自動テストが途中で止まるため、`caffeinate -i npm run smoke` で実行してください。
+Mac がスリープすると長い処理が途中で止まるため、`caffeinate -i npm run smoke`・`caffeinate -i npm run balance` のように実行してください。
 
 イベントの追加や効果の入れ替えは `js/events.js` の `EVENTS` を編集します。

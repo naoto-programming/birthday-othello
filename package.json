@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node --test",
     "serve": "node tools/serve.mjs",
-    "smoke": "node tools/smoke.mjs"
+    "smoke": "node tools/smoke.mjs",
+    "balance": "node tools/balance.mjs"
   }
 }
