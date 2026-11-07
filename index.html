@@ -39,15 +39,15 @@
 
     <section id="game" class="screen" hidden>
       <header class="status">
-        <p class="today"><span class="today-label">今日</span><span id="today-date"></span></p>
+        <p class="today"><span class="today-label">今日</span><span id="today-date"></span><span id="square-size" class="square-size"></span></p>
         <div class="players">
           <div id="status-black" class="pl black"></div>
           <div id="status-white" class="pl white"></div>
         </div>
         <p id="turn-msg" class="turn-msg" aria-live="polite"></p>
       </header>
-      <div id="board" class="board"></div>
-      <div id="adjust" class="adjust card" hidden></div>
+      <div class="board-wrap"><div id="board" class="board"></div></div>
+      <div id="preview-panel" class="preview-panel card" hidden aria-live="polite"></div>
       <footer class="game-footer">
         <button type="button" class="link" data-action="rules">ルール</button>
         <button type="button" class="link" data-action="quit">設定に戻る</button>
@@ -86,13 +86,17 @@
   <dialog id="rules-dialog" class="card">
     <h2>ルール</h2>
     <ul class="rules">
-      <li>空いているマスならどこにでも置けます。挟んだ相手の石は、普通のオセロと同じく裏返ります。</li>
-      <li>裏返った石の数字(重さ)の合計だけ日付が動きます。黒は過去へ、白は未来へ動かします。</li>
-      <li>石は裏返るたびに重くなります。</li>
+      <li>盤面は空っぽから始まります。空いているマスならどこにでも置けます。</li>
+      <li>相手の石を挟むと裏返せます。挟んだ列が複数あるときは、返す列を選べます(少なくとも1列)。</li>
+      <li>裏返した石の数字(重さ)の合計だけ、日付がマスを動きます。黒は黒の誕生日へ、白は白の誕生日へ引っぱります。</li>
+      <li>石の重さは「1 + 裏返った回数」です。</li>
+      <li>日付は2人の誕生日の間のマスを動きます。誕生日が30日より離れているときは、1マスが数日分になります。</li>
+      <li>挟める手があるのに1枚も返さないと、日付が相手の誕生日の方へ1マス動きます。</li>
       <li>誕生日を通り越したら、通り越した分だけ跳ね返ります。</li>
       <li>日付が誕生日にぴったり止まったら、その誕生日の人の勝ちです(どちらが動かしても)。</li>
-      <li>盤面が埋まったら、誕生日までの残り日数が少ない方の勝ち。同じなら石の数で決めます。</li>
-      <li>祝日や行事の日にぴったり止めると、イベントが起きます(1試合に1回ずつ)。</li>
+      <li>盤面が埋まったら、誕生日までの残りマス数が少ない方の勝ち。同じなら石の数で決めます。</li>
+      <li>祝日や行事のマスにぴったり止めると、イベントが起きます(1試合に1回ずつ)。</li>
+      <li>マスをタップすると結果を予告します。「ここに置く」か、同じマスをもう一度タップすると決定です。</li>
     </ul>
     <h3>イベント</h3>
     <ul id="rules-events" class="rules-events"></ul>

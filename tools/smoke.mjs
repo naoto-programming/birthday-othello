@@ -1,5 +1,5 @@
 // ヘッドレス Chrome で画面を開いて操作し、エラーがないことを確かめ、スクリーンショットを保存する。
-// 使い方: npm run smoke(公開版を確かめるときは SMOKE_URL=https://... npm run smoke)
+// 使い方: caffeinate -i npm run smoke(公開版を確かめるときは SMOKE_URL=https://... を付ける)
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,10 +23,7 @@ const chrome = spawn(CHROME, [
   '--remote-allow-origins=*',
   `--user-data-dir=${profile}`,
   '--no-first-run',
-  // headless Chrome は実ウィンドウがなく visibilityState は 'visible' のままでも、
-  // レンダラーのタイマーが数秒でまるごと止まることがある(次のフレームの setTimeout が
-  // 何秒も発火しない)。長い演出(animateMove の日付カウントアップ)の途中で止まると
-  // settled() の待ちがタイムアウトする。バックグラウンド扱いによるタイマー抑制を切る。
+  // バックグラウンド扱いによるタイマーの抑制を切る(長い演出の途中で止まらないように)
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
@@ -71,7 +68,6 @@ try {
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Log.enable');
-  // JS の変更をすぐ反映できるよう、常にキャッシュを無効化する
   await send('Network.enable');
   await send('Network.setCacheDisabled', { cacheDisabled: true });
   mkdirSync(OUT, { recursive: true });
@@ -95,25 +91,39 @@ console.log(`OK: スクリーンショットを ${fileURLToPath(OUT)} に保存�
 // ---- シナリオ ----
 
 async function scenarios() {
-  // 1. スマホ幅: 設定 → 序盤の3手
+  // 1. スマホ幅: 設定 → 空の盤面 → 予告 → 決定、序盤の3手
   await open(390, 844);
   await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
-  const preview = await js(`document.querySelector('#setup-preview').textContent`);
+  const setupText = await js(`document.querySelector('#setup-preview').textContent`);
   check(
-    preview.includes('黒: たろう(10/14)') && preview.includes('白: はなこ(12/3)')
-      && preview.includes('間は50日') && preview.includes('+2'),
-    `設定の確認文が想定と違います: ${preview}`,
+    setupText.includes('黒: たろう(10/14)') && setupText.includes('白: はなこ(12/3)') && setupText.includes('間は50日、25マス(1マス=2日)'),
+    `設定の確認文が想定と違います: ${setupText}`,
   );
   check(await noHorizontalScroll(), '設定画面(390px)が横にスクロールします');
   await shot('phone-setup');
   await startFromSetup();
+  check(await stoneCount() === 0, `空の盤面から始まっていません: 石の数 ${await stoneCount()}`);
+  check(await js(`document.querySelector('#square-size').textContent`) === '1マス=2日', '上部の帯に「1マス=2日」が出ていません');
+  check(await js(`document.querySelector('#board .cell.is-today .today-tag') !== null`), '今日のマスに「今日」の札がありません');
+  check(await js(`document.querySelectorAll('#board .cell.in-period').length`) === 1, '1マス=2日のとき、今のマスの期間に色がついていません');
   const before = await todayText();
-  for (const idx of [19, 18, 37]) {
-    await clickCell(idx);
-    await settled();
-  }
-  check(await stoneCount() === 7, `3手打った後の石の数が7ではありません: ${await stoneCount()}`);
-  check(await todayText() !== before, `打っても日付が変わっていません: ${before}`);
+  await tapCell(27);
+  check(await stoneCount() === 0, '予告しただけで石が置かれています');
+  check(await js(`document.querySelector('#board .cell[data-idx="27"] .stone.ghost') !== null`), '予告の半透明の石が出ていません');
+  check(!(await js(`document.querySelector('#preview-panel').hidden`)), '予告パネルが出ていません');
+  check(await panelText().then((t) => t.includes('挟める手がない')), `空の盤面での予告文がおかしいです: ${await panelText()}`);
+  await tapCell(36);
+  check(await stoneCount() === 0, '別のマスをタップしただけで石が置かれています');
+  check(await js(`document.querySelector('#board .cell[data-idx="36"] .stone.ghost') !== null`), '予告が別のマスに切り替わっていません');
+  await shot('phone-preview');
+  await tapCell(36);
+  await settled();
+  check(await stoneCount() === 1, '同じマスの2回目のタップで石が置かれていません');
+  check(await js(`document.querySelector('#preview-panel').hidden`), '打った後も予告パネルが残っています');
+  await playCell(28);
+  await playCell(20);
+  check(await stoneCount() === 3, `3手打った後の石の数が3ではありません: ${await stoneCount()}`);
+  check(await todayText() !== before, `石を返しても日付が変わっていません: ${before}`);
   check(await noHorizontalScroll(), '対戦画面(390px)が横にスクロールします');
   await shot('phone-game');
 
@@ -136,10 +146,10 @@ async function scenarios() {
   await startFromSetup();
   await js(`(() => {
     const cell = (i) => document.querySelector('#board .cell[data-idx="' + i + '"]');
-    cell(19).click(); cell(19).click(); cell(20).click();
+    cell(19).click(); cell(19).click(); cell(20).click(); cell(20).click();
   })()`);
   await settled();
-  check(await stoneCount() === 5, `連打で2手以上打てています: 石の数 ${await stoneCount()}`);
+  check(await stoneCount() === 1, `連打で2手以上打てています: 石の数 ${await stoneCount()}`);
   check(await noHorizontalScroll(), '対戦画面(320px)が横にスクロールします');
   await shot('small-game');
 
@@ -149,39 +159,47 @@ async function scenarios() {
   await startFromSetup();
   await shot('pc-game');
 
-  // 4. 日数調整の操作部品
-  const adjust = await js(`(async () => {
-    const ui = await import(new URL('js/ui.js', document.baseURI).href);
-    const pending = { double: false, plus3: false, adjust: true, rest: false, reverse: false };
-    const choice = ui.chooseAdjust(5, pending, 'B');
-    const buttons = [...document.querySelectorAll('#adjust .adjust-row button')];
-    const labels = buttons.map((b) => b.textContent);
-    buttons[6].click();
-    return { labels, value: await choice, hidden: document.querySelector('#adjust').hidden };
-  })()`);
-  check(
-    adjust.labels.length === 7 && adjust.labels[0] === '-3(2日)' && adjust.labels[6] === '+3(8日)'
-      && adjust.value === 3 && adjust.hidden,
-    `日数調整の表示か選択がおかしいです: ${JSON.stringify(adjust)}`,
-  );
+  // 4. 返す列を選ぶ(6/1 と 6/20。間にイベントがない)。黒が (3,5)=29 に置くと、左の列(28)と下の列(37)を挟める
+  await open(390, 844);
+  await fillSetup({ name: 'れつ', m: 6, d: 1 }, { name: 'えらび', m: 6, d: 20 });
+  await startFromSetup();
+  for (const idx of [27, 28, 45, 37]) await playCell(idx);
+  await tapCell(29);
+  check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 2, '2つの列が予告されていません');
+  check(await panelText().then((t) => t.includes('2枚返して')), `2列を返す予告文になっていません: ${await panelText()}`);
+  await tapCell(37);
+  check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 1, '列の石をタップしても列が外れません');
+  check(await js(`document.querySelectorAll('#board .cell.line-off').length`) === 1, '外した列が点線になっていません');
+  check(await panelText().then((t) => t.includes('1枚返して')), `列を外した後の予告文になっていません: ${await panelText()}`);
+  await tapCell(28);
+  check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 1, '最後の1列が外れてしまいました');
+  await shot('phone-lines');
+  await js(`document.querySelector('#preview-panel [data-pv="confirm"]').click()`);
+  await settled();
+  check(await js(`document.querySelector('#board .cell[data-idx="28"] .stone').classList.contains('black')`), '選んだ列の石が返っていません');
+  check(await js(`document.querySelector('#board .cell[data-idx="37"] .stone').classList.contains('white')`), '外した列の石まで返っています');
+  await tapCell(0);
+  await js(`document.querySelector('#preview-panel [data-pv="cancel"]').click()`);
+  check(await js(`document.querySelector('#preview-panel').hidden`), '「やめる」で予告が消えません');
+  check(await js(`document.querySelector('#board .stone.ghost') === null`), '「やめる」の後も半透明の石が残っています');
 
-  // 5. イベント: 10/28 と 11/5(開始 11/1)。黒の1手目で 10/31 ハロウィンに止まる
+  // 5. イベント: 10/28 と 11/5(開始 11/1、1マス=1日)。黒の3手目で 10/31 ハロウィンに止まる
   await open(390, 844);
   await fillSetup({ name: 'たろう', m: 10, d: 28 }, { name: 'はなこ', m: 11, d: 5 });
   await startFromSetup();
-  await clickCell(19);
-  await settled();
+  await playCell(27);
+  await playCell(28);
+  await playCell(29);
   check(await js(`document.querySelector('#event-dialog').open`), 'ハロウィンに止まってもイベントのポップアップが出ません');
   check((await js(`document.querySelector('#event-title').textContent`)).includes('ハロウィン'), 'イベント名がハロウィンではありません');
   await shot('phone-event');
   await js(`document.querySelector('#event-dialog button').click()`);
   await settled();
-  check((await js(`document.querySelector('#status-black').textContent`)).includes('日数2倍'), '黒の次の手に「日数2倍」が表示されていません');
-  for (const idx of [18, 37]) {
-    await clickCell(idx);
-    await settled();
-  }
-  check(await todayText() === '10月31日', `2倍が効いた後の日付が 10月31日 ではありません: ${await todayText()}`);
+  check((await js(`document.querySelector('#status-black').textContent`)).includes('2倍'), '黒の次の手に「2倍」が表示されていません');
+  await playCell(26);
+  check(await todayText() === '10月31日', `挟める手がない白の手で日付が動いています: ${await todayText()}`);
+  await playCell(25);
+  check(await todayText() === '10月29日', `2倍が効いた後の日付が 10月29日 ではありません: ${await todayText()}`);
 
   // 6. 最後まで打って結果を出し、再戦 → 2回目は Esc 相当で閉じて設定に戻る
   check(await playToEnd(), '最後まで打っても結果が出ません');
@@ -189,15 +207,14 @@ async function scenarios() {
   check(title.includes('お誕生日おめでとう') || title.includes('引き分け'), `結果の見出しがおかしいです: ${title}`);
   await shot('phone-result');
   await js(`document.querySelector('#result-dialog button[value=rematch]').click()`);
-  // close イベントは非同期に届くので、盤面が作り直されるまで待つ
-  await waitFor(`document.querySelectorAll('#board .stone').length === 4`, 3000).catch(() => {});
-  check(await stoneCount() === 4, '再戦で盤面が初期状態になっていません');
+  await waitFor(`!document.querySelector('#result-dialog').open && document.querySelectorAll('#board .stone').length === 0`, 3000).catch(() => {});
+  check(await stoneCount() === 0, '再戦で盤面が空になっていません');
   check(await playToEnd(), '再戦で最後まで打っても結果が出ません');
   await js(`document.querySelector('#result-dialog').close()`);
   await waitFor(`!document.querySelector('#setup').hidden`, 2000).catch(() => {});
   check(await js(`!document.querySelector('#setup').hidden`), 'ボタン以外で結果を閉じたとき設定画面に戻りません(前回の再戦が残っています)');
 
-  // 7. 半年離れた誕生日で最後まで(大きな移動と演出の上限)
+  // 7. 半年離れた誕生日で最後まで
   await open(320, 640);
   await fillSetup({ name: 'あいうえおかきくけこ', m: 1, d: 1 }, { name: 'さしすせそたちつてと', m: 7, d: 1 });
   await startFromSetup();
@@ -211,67 +228,75 @@ async function scenarios() {
   check(await js(`document.querySelector('#rules-dialog').scrollTop`) === 0, 'ルールダイアログが先頭にスクロールしていません');
   await shot('small-rules');
 
-  // 9. 日数調整パネルの表示位置と、調整待ち中に中断したときの後始末
-  // 誕生日 11/1・11/7 → D=6, s=1, 既定開始日 11/4(p=3)。黒の1手目(idx19)が11/3(文化の日・調整)に止まり、
-  // 黒の次の手に調整が効く。白(idx18)で11/5。黒の次(idx37, base=1)で調整パネルが出る。
+  // 9. 調整つきの予告(11/1 と 11/7、1マス=1日)。黒の3手目で 11/3 文化の日に止まり、次の黒の手で調整が出る
   await open(375, 553);
   await fillSetup({ name: 'くろ', m: 11, d: 1 }, { name: 'しろ', m: 11, d: 7 });
   await startFromSetup();
-  await clickCell(19);
-  await settled();
+  await playCell(27);
+  await playCell(28);
+  await playCell(29);
   check(await js(`document.querySelector('#event-dialog').open`), '文化の日のイベントが発動しません');
   await js(`document.querySelector('#event-dialog button').click()`);
   await settled();
-  await clickCell(18);
-  await settled();
-  await clickCell(37);
-  await waitFor(`!document.querySelector('#adjust').hidden`);
-  const adjustRect = await js(`(() => {
-    const r = document.querySelector('#adjust').getBoundingClientRect();
+  await playCell(26);
+  await tapCell(25);
+  await waitFor(`document.querySelector('#preview-panel .adjust-row') !== null`);
+  const panelRect = await js(`(() => {
+    const r = document.querySelector('#preview-panel').getBoundingClientRect();
     return { top: r.top, bottom: r.bottom };
   })()`);
-  check(
-    adjustRect.top >= 0 && adjustRect.bottom <= 553,
-    `日数調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(adjustRect)}`,
-  );
+  check(panelRect.top >= 0 && panelRect.bottom <= 553, `予告パネルが375x553の画面からはみ出しています: ${JSON.stringify(panelRect)}`);
+  check(await js(`document.querySelectorAll('#preview-panel .adjust-row button').length`) === 7, '調整のボタンが7つではありません');
+  await js(`document.querySelector('#preview-panel [data-adjust="2"]').click()`);
+  check(await panelText().then((t) => t.includes('3マス動く')), `調整+2が予告に反映されていません: ${await panelText()}`);
   await shot('adjust-visible');
-
-  // I1(a): 調整待ち中に「設定に戻る」で中断しても、次の対戦に影響が残らない
+  // 予告中に「設定に戻る」で中断しても、次の対戦に残らない
   await js(`document.querySelector('[data-action="quit"]').click()`);
   await waitFor(`!document.querySelector('#setup').hidden`);
-  check(await js(`document.body.dataset.busy`) === '0', '調整待ち中に中断しても busy が 0 に戻りません');
-  check(await js(`document.querySelector('#adjust').hidden`), '調整待ち中に中断しても調整パネルが隠れません');
+  check(await js(`document.body.dataset.busy`) !== '1', '予告中に中断しても busy が残っています');
   await startFromSetup();
-  check(await stoneCount() === 4, '調整待ち中に中断した後の新しい対戦が初期状態(4石)になっていません');
-  await clickCell(20);
-  await settled();
-  check(await stoneCount() === 5, '調整待ち中に中断した後、新しい対戦で盤面タップが効きません');
+  check(await stoneCount() === 0, '中断後の新しい対戦が空の盤面になっていません');
+  check(await js(`document.querySelector('#preview-panel').hidden`), '中断後の新しい対戦に予告パネルが残っています');
+  check(await js(`document.querySelector('#board .stone.ghost') === null`), '中断後の新しい対戦に半透明の石が残っています');
+  await playCell(20);
+  check(await stoneCount() === 1, '中断後の新しい対戦で打てません');
 
   // 10. 演出中に「設定に戻る」で中断し、演出が終わる前に新しい対戦を始めても上書きされない
   await open(400, 700);
   await fillSetup({ name: 'アニメ太郎', m: 3, d: 1 }, { name: 'アニメ花子', m: 9, d: 1 });
   await startFromSetup();
-  await clickCell(19);
+  await tapCell(27);
   await js(`(() => {
+    document.querySelector('#board .cell[data-idx="27"]').click();
     document.querySelector('[data-action="quit"]').click();
     document.querySelector('#setup-form button[type=submit]').click();
   })()`);
   await waitFor(`!document.querySelector('#game').hidden`);
-  await sleep(1000);
-  check(await stoneCount() === 4, '演出中に中断して新しい対戦を始めても、盤面が上書きされます');
-  check(
-    await js(`document.querySelector('#status-black').classList.contains('active')`),
-    '演出中に中断して新しい対戦を始めても、黒の番になっていません',
-  );
+  await sleep(1500);
+  check(await stoneCount() === 0, '演出中に中断して新しい対戦を始めても、盤面が上書きされます');
+  check(await js(`document.querySelector('#status-black').classList.contains('active')`), '演出中に中断して新しい対戦を始めても、黒の番になっていません');
   check(await noHorizontalScroll(), '演出中断からの新しい対戦画面が横にスクロールします');
 
-  // 11. (任意) 開発サーバーが壊れたURLでも落ちずに400を返す
+  // 11. 端末で「動きを減らす」が有効なら、打ってから盤面の更新までがすぐ終わる
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await open(390, 844);
+  await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
+  await startFromSetup();
+  await tapCell(27);
+  const t0 = Date.now();
+  await tapCell(27);
+  await settled();
+  const elapsed = Date.now() - t0;
+  check(elapsed < 300, `動きを減らす設定でも、打ってから更新まで ${elapsed}ms かかっています`);
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
+  // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
 
-// 壊れたURLを送っても dev サーバーが落ちず、400を返して配信を続けられることを確かめる(任意項目)
+// 壊れたURLを送っても dev サーバーが落ちず、400を返して配信を続けられることを確かめる
 async function checkServerRobustness() {
-  if (process.env.SMOKE_URL) return; // 自前のサーバーを使っていないときは対象外
+  if (process.env.SMOKE_URL) return;
   const malformed = await rawGet('/%E0%A4%A').catch((err) => `error:${err.code ?? err.message}`);
   check(malformed === 400, `壊れたURL(不正なパーセントエンコーディング)で400を返しません: ${malformed}`);
   const doubleSlash = await rawGet('//').catch((err) => `error:${err.code ?? err.message}`);
@@ -357,14 +382,20 @@ async function startFromSetup() {
   await waitFor(`!document.querySelector('#game').hidden`);
 }
 
-function clickCell(idx) { return js(`document.querySelector('#board .cell[data-idx="${idx}"]').click()`); }
-function settled() {
-  return waitFor(
-    `document.body.dataset.busy !== '1' || document.querySelector('dialog[open]') || !document.querySelector('#adjust').hidden`,
-  );
+// マスを1回タップする(空きマスなら予告、予告中のマスなら決定、列の石なら列の切り替え)
+function tapCell(idx) { return js(`document.querySelector('#board .cell[data-idx="${idx}"]').click()`); }
+// 予告してから同じマスをもう一度タップして打ち、演出が終わるまで待つ
+async function playCell(idx) {
+  await tapCell(idx);
+  await tapCell(idx);
+  await settled();
 }
-function stoneCount() { return js(`document.querySelectorAll('#board .stone').length`); }
+function settled() {
+  return waitFor(`document.body.dataset.busy !== '1' || document.querySelector('dialog[open]')`);
+}
+function stoneCount() { return js(`document.querySelectorAll('#board .stone:not(.ghost)').length`); }
 function todayText() { return js(`document.querySelector('#today-date').textContent`); }
+function panelText() { return js(`document.querySelector('#preview-panel').textContent`); }
 function noHorizontalScroll() { return js(`document.documentElement.scrollWidth <= window.innerWidth`); }
 
 async function shot(name) {
@@ -376,18 +407,22 @@ function check(ok, message) {
   if (!ok) failures.push(message);
 }
 
-// 決着がつくまで打つ。ポップアップ・日数調整・選択は最初の選択肢で進める。
+// 決着がつくまで打つ。ポップアップは閉じ、選ぶ効果は最初の候補を選び、手は最初の空きマスに予告→決定で打つ。
 async function playToEnd() {
   for (let step = 0; step < 400; step++) {
     if (await js(`document.querySelector('#result-dialog').open`)) return true;
     if (await js(`document.querySelector('#event-dialog').open`)) {
       await js(`document.querySelector('#event-dialog button').click()`);
-    } else if (await js(`!document.querySelector('#adjust').hidden`)) {
-      await js(`document.querySelector('#adjust .adjust-row button').click()`);
     } else if (await js(`document.querySelector('#board .cell.target') !== null`)) {
       await js(`document.querySelector('#board .cell.target').click()`);
     } else {
-      await js(`document.querySelector('#board .cell:not(.has-stone)').click()`);
+      const idx = await js(`document.querySelector('#board .cell:not(.has-stone)')?.dataset.idx ?? null`);
+      if (idx === null) {
+        await sleep(100);
+        continue;
+      }
+      await tapCell(Number(idx));
+      await tapCell(Number(idx));
     }
     await settled();
   }
