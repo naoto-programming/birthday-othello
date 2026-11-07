@@ -1,20 +1,22 @@
 import { listEventDays } from './events.js';
+import { squareOfOffset } from './dates.js';
 
 export const SIZE = 8;
+// 方向の番号(0〜7): 0 左上, 1 上, 2 右上, 3 左, 4 右, 5 左下, 6 下, 7 右下。返す列の選択で使う。
 const DIRECTIONS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
 
 export const opponent = (color) => (color === 'B' ? 'W' : 'B');
 
-// 石の重さ = 次に裏返ったときに日付を何日動かすか
-export function stoneWeight(stone, s) {
-  return 1 + stone.flips * s;
+// 石の重さ = 次に裏返ったときに日付を何マス動かすか
+export function stoneWeight(stone) {
+  return 1 + stone.flips;
 }
 
-// 位置 x を 0〜D の範囲へ跳ね返らせる(何度でも)
-export function reflect(x, D) {
-  const period = 2 * D;
+// 位置 x を 0〜N の範囲へ跳ね返らせる(何度でも)
+export function reflect(x, N) {
+  const period = 2 * N;
   const r = ((x % period) + period) % period;
-  return r > D ? period - r : r;
+  return r > N ? period - r : r;
 }
 
 function emptyPending() {
@@ -25,25 +27,20 @@ const SELF_EFFECTS = ['double', 'plus3', 'adjust'];
 const OPPONENT_EFFECTS = ['rest', 'reverse'];
 const CHOICE_EFFECTS = ['remove', 'fix', 'steal', 'plant'];
 
-// match: setupMatch の戻り値
+// match: setupMatch の戻り値(D: 誕生日の間の日数、N: マス数、u0: 開始マス)
 export function newGame(match) {
-  const board = Array(SIZE * SIZE).fill(null);
-  const put = (r, c, color) => { board[r * SIZE + c] = { color, flips: 0, fixed: false }; };
-  put(3, 3, 'W');
-  put(4, 4, 'W');
-  put(3, 4, 'B');
-  put(4, 3, 'B');
+  const { baseDay, D, N } = match;
   const events = {};
-  for (const { day, event } of listEventDays(match.baseDay + 1, match.baseDay + match.D - 1)) {
-    const p = day - match.baseDay;
-    if (!events[p]) events[p] = { ...event, day, used: false };
+  for (const { day, event } of listEventDays(baseDay + 1, baseDay + D - 1)) {
+    const u = squareOfOffset(day - baseDay, D, N);
+    if (u > 0 && u < N && !events[u]) events[u] = { ...event, day, used: false };
   }
   return {
     match,
-    board,
+    board: Array(SIZE * SIZE).fill(null),
     events,
     turn: 'B',
-    p: match.p0,
+    p: match.u0,
     pending: { B: emptyPending(), W: emptyPending() },
     phase: 'play',
     choice: null,
@@ -52,77 +49,111 @@ export function newGame(match) {
   };
 }
 
-// idx に color の石を置いたときに裏返る石。相手の固定石は壁として働く。
-export function computeFlips(board, idx, color) {
+// idx に color の石を置いたときに返せる列。dir は方向の番号、cells は裏返る石(置いたマスに近い順)。
+// 相手の固定石は壁として働き、その方向は列にならない。
+export function flipLines(board, idx, color) {
   if (board[idx]) return [];
   const r0 = Math.floor(idx / SIZE);
   const c0 = idx % SIZE;
-  const result = [];
-  for (const [dr, dc] of DIRECTIONS) {
-    const line = [];
+  const lines = [];
+  DIRECTIONS.forEach(([dr, dc], dir) => {
+    const cells = [];
     let r = r0 + dr;
     let c = c0 + dc;
     while (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
       const stone = board[r * SIZE + c];
-      if (!stone) break;
+      if (!stone) return;
       if (stone.color === color) {
-        result.push(...line);
-        break;
+        if (cells.length) lines.push({ dir, cells });
+        return;
       }
-      if (stone.fixed) break;
-      line.push(r * SIZE + c);
+      if (stone.fixed) return;
+      cells.push(r * SIZE + c);
       r += dr;
       c += dc;
     }
+  });
+  return lines;
+}
+
+// すべての列を返したときに裏返る石
+export function computeFlips(board, idx, color) {
+  return flipLines(board, idx, color).flatMap((line) => line.cells);
+}
+
+// color の番で、どこかのマスに石を挟める手があるか
+export function canFlipAnywhere(board, color) {
+  for (let idx = 0; idx < SIZE * SIZE; idx++) {
+    if (!board[idx] && flipLines(board, idx, color).length > 0) return true;
   }
-  return result;
+  return false;
 }
 
-// 打つ前の確認: 裏返る石、基本の移動日数、日数調整の選択が必要か
-export function previewMove(state, idx) {
-  const flips = computeFlips(state.board, idx, state.turn);
-  const base = flips.reduce((sum, i) => sum + stoneWeight(state.board[i], state.match.s), 0);
-  return { flips, base, needsAdjust: state.pending[state.turn].adjust && base > 0 };
+// 移動マス数と向き。
+// 1枚以上返すとき: 基本 → 2倍 → +3 → 調整 → おやすみ → うそ。
+// 1枚も返さないとき: penalty(挟める手があったのに返さなかった)なら、効果に関係なく相手の誕生日の方へ1マス。そうでなければ動かない。
+export function moveDays(base, pending, color, adjust = 0, penalty = false) {
+  const toOwn = color === 'B' ? -1 : 1;
+  if (base === 0) return penalty ? { days: 1, dir: -toOwn, stall: true } : { days: 0, dir: toOwn, stall: false };
+  let days = base;
+  if (pending.double) days *= 2;
+  if (pending.plus3) days += 3;
+  if (pending.adjust) days = Math.max(0, days + Math.max(-3, Math.min(3, adjust)));
+  if (pending.rest) days = 0;
+  return { days, dir: pending.reverse ? -toOwn : toOwn, stall: false };
 }
 
-// 移動日数と向き。計算順: 基本 → 2倍 → +3 → 調整 → おやすみ → うそ
-export function moveDays(base, pending, color, adjust = 0) {
-  let days = 0;
-  if (base > 0) {
-    days = base;
-    if (pending.double) days *= 2;
-    if (pending.plus3) days += 3;
-    if (pending.adjust) days = Math.max(0, days + Math.max(-3, Math.min(3, adjust)));
-    if (pending.rest) days = 0;
-  }
-  let dir = color === 'B' ? -1 : 1;
-  if (pending.reverse) dir = -dir;
-  return { days, dir };
+// 打つ前の予告。options.lines: 返す列の方向番号(省略時はすべて。空ならすべて)、options.adjust: 調整(−3〜+3)
+export function previewMove(state, idx, options = {}) {
+  const color = state.turn;
+  const { N } = state.match;
+  const pending = state.pending[color];
+  const lines = flipLines(state.board, idx, color);
+  const available = lines.map((line) => line.dir);
+  let chosen = options.lines === undefined ? available : available.filter((dir) => options.lines.includes(dir));
+  if (chosen.length === 0) chosen = available;
+  const flips = lines.filter((line) => chosen.includes(line.dir)).flatMap((line) => line.cells);
+  const base = flips.reduce((sum, i) => sum + stoneWeight(state.board[i]), 0);
+  const needsAdjust = pending.adjust && base > 0;
+  const adjust = needsAdjust ? Math.max(-3, Math.min(3, options.adjust ?? 0)) : 0;
+  const penalty = base === 0 && canFlipAnywhere(state.board, color);
+  const { days, dir, stall } = moveDays(base, pending, color, adjust, penalty);
+  const raw = state.p + dir * days;
+  const toP = reflect(raw, N);
+  const win = toP === 0 ? 'B' : toP === N ? 'W' : null;
+  const target = !win && days > 0 ? state.events[toP] : null;
+  return {
+    idx, lines, chosen, flips, base, needsAdjust, adjust, days, dir, stall, toP,
+    bounced: raw < 0 || raw > N,
+    win,
+    event: target && !target.used ? target : null,
+  };
 }
 
-export function playMove(state, idx, adjust = 0) {
+export function playMove(state, idx, options = {}) {
   if (state.phase !== 'play' || state.board[idx]) return state;
+  const move = previewMove(state, idx, options);
   const next = structuredClone(state);
   const color = next.turn;
-  const { flips, base } = previewMove(next, idx);
   next.board[idx] = { color, flips: 0, fixed: false };
-  for (const i of flips) {
+  for (const i of move.flips) {
     next.board[i].color = color;
     next.board[i].flips += 1;
   }
-  const { days, dir } = moveDays(base, next.pending[color], color, adjust);
   next.pending[color] = emptyPending();
   const fromP = next.p;
-  next.p = reflect(fromP + dir * days, next.match.D);
-  next.lastMove = { color, idx, flips, base, days, dir, fromP, toP: next.p, event: null, fizzled: false };
-
-  if (next.p === 0 || next.p === next.match.D) {
+  next.p = move.toP;
+  next.lastMove = {
+    color, idx, lines: move.chosen, flips: move.flips, base: move.base, days: move.days, dir: move.dir,
+    stall: move.stall, fromP, toP: next.p, event: null, fizzled: false,
+  };
+  if (move.win) {
     next.phase = 'over';
-    next.result = { winner: next.p === 0 ? 'B' : 'W', reason: 'birthday' };
+    next.result = { winner: move.win, reason: 'birthday' };
     return next;
   }
   let extraTurn = false;
-  const event = days > 0 ? next.events[next.p] : null;
+  const event = move.days > 0 ? next.events[next.p] : null;
   if (event && !event.used) {
     event.used = true;
     next.lastMove.event = { ...event };
@@ -149,10 +180,10 @@ export function countStones(state) {
   return count;
 }
 
-// 盤面が埋まったときの判定: 誕生日までの残り日数 → 石の数 → 引き分け
+// 盤面が埋まったときの判定: 誕生日までの残りマス数 → 石の数 → 引き分け
 export function judgeFull(state) {
   const blackLeft = state.p;
-  const whiteLeft = state.match.D - state.p;
+  const whiteLeft = state.match.N - state.p;
   if (blackLeft !== whiteLeft) return { winner: blackLeft < whiteLeft ? 'B' : 'W', reason: 'full' };
   const { B, W } = countStones(state);
   if (B !== W) return { winner: B > W ? 'B' : 'W', reason: 'full' };
@@ -168,7 +199,7 @@ function applyEffect(state, effect, color) {
   } else if (effect === 'extraTurn') {
     return true;
   } else if (effect === 'middle') {
-    state.p = Math.floor(state.match.D / 2);
+    state.p = Math.floor(state.match.N / 2);
     state.lastMove.warpTo = state.p;
   } else if (effect === 'resetWeights') {
     for (const stone of state.board) if (stone) stone.flips = 0;

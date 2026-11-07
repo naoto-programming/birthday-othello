@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dayNum, fromDayNum, weekday, birthdayInYear, prevOccurrence, nextOccurrence, growthStep,
+  dayNum, fromDayNum, weekday, birthdayInYear, prevOccurrence, nextOccurrence,
   setupMatch, defaultStart, boardDates, formatMD, toISODate, parseISODate,
   dateLine, squareOffset, squareOfOffset, squarePeriod,
 } from '../js/dates.js';
@@ -32,14 +32,6 @@ test('prevOccurrence / nextOccurrence は当日を含まない', () => {
   assert.equal(nextOccurrence({ m: 12, d: 3 }, day), dayNum(2026, 12, 3));
 });
 
-test('growthStep: D/24 を四捨五入し、最低1', () => {
-  assert.equal(growthStep(2), 1);
-  assert.equal(growthStep(20), 1);
-  assert.equal(growthStep(36), 2);
-  assert.equal(growthStep(40), 2);
-  assert.equal(growthStep(180), 8);
-});
-
 test('setupMatch: 過去側の誕生日の人が黒、未来側の人が白', () => {
   const m = setupMatch([taro, hanako], dayNum(2026, 11, 8));
   assert.equal(m.black.name, 'たろう');
@@ -49,7 +41,6 @@ test('setupMatch: 過去側の誕生日の人が黒、未来側の人が白', ()
   assert.equal(m.baseDay, dayNum(2026, 10, 14));
   assert.equal(m.D, 50);
   assert.equal(m.p0, 25);
-  assert.equal(m.s, 2);
   assert.equal(m.sameBirthday, false);
   assert.equal(m.N, 25);
   assert.equal(m.k, 2);

@@ -3,13 +3,13 @@ import { resolveRule } from './holidays.js';
 
 // 効果の部品。イベント表はこの ID を割り当てる。
 export const EFFECTS = {
-  plus3: { name: '日数プラス', text: '自分の次の手で動く日数が+3日' },
-  double: { name: '日数2倍', text: '自分の次の手で動く日数が2倍' },
-  adjust: { name: '日数調整', text: '自分の次の手で、動く日数を−3〜+3日の範囲で選べる' },
+  plus3: { name: 'プラス3', text: '自分の次の手で動くマス数が+3' },
+  double: { name: '2倍', text: '自分の次の手で動くマス数が2倍' },
+  adjust: { name: '調整', text: '自分の次の手で、動くマス数を−3〜+3の範囲で選べる' },
   extraTurn: { name: 'もう一手', text: '続けてもう1回打てる' },
-  rest: { name: 'おやすみ', text: '相手の次の手は日付が動かない' },
+  rest: { name: 'おやすみ', text: '相手の次の手は、石を返しても日付が動かない' },
   reverse: { name: 'うそ', text: '相手の次の手は日付が逆向きに動く' },
-  middle: { name: '真ん中へ', text: '日付が2人の誕生日のちょうど真ん中に飛ぶ' },
+  middle: { name: '真ん中へ', text: '日付が2人の誕生日のちょうど真ん中のマスに飛ぶ' },
   remove: { name: '鬼は外', text: '相手の石を1つ選んで取り除く' },
   fix: { name: '固定', text: '自分の石を1つ選んで固定する(以後は裏返らない)' },
   steal: { name: '奪う', text: '相手の石を1つ選んで自分の色にする' },

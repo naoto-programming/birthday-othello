@@ -38,11 +38,6 @@ export function nextOccurrence(birthday, day) {
   return thisYear > day ? thisYear : birthdayInYear(birthday, y + 1);
 }
 
-// 石が裏返るたびに重くなる量。2人の誕生日が離れているほど大きくする。
-export function growthStep(D) {
-  return Math.max(1, Math.round(D / 24));
-}
-
 // 日付の道: 2人の誕生日の間を N マスに分ける。30日以下なら1マス=1日、それより長ければ1マス=k日(N は30以下)。
 export function dateLine(D) {
   if (D <= 30) return { N: D, k: 1 };
@@ -95,7 +90,6 @@ export function setupMatch(players, start, rng = Math.random) {
     baseDay,
     D,
     p0: start - baseDay,
-    s: growthStep(D),
     sameBirthday,
     N,
     k,
