@@ -43,6 +43,32 @@ export function growthStep(D) {
   return Math.max(1, Math.round(D / 24));
 }
 
+// 日付の道: 2人の誕生日の間を N マスに分ける。30日以下なら1マス=1日、それより長ければ1マス=k日(N は30以下)。
+export function dateLine(D) {
+  if (D <= 30) return { N: D, k: 1 };
+  const k = Math.ceil(D / 30);
+  return { N: Math.round(D / k), k };
+}
+
+// マス u の日付が、黒の誕生日から何日目か
+export function squareOffset(u, D, N) {
+  return Math.round((u * D) / N);
+}
+
+// 黒の誕生日から offset 日目の日付が属するマス
+export function squareOfOffset(offset, D, N) {
+  return Math.round((offset * N) / D);
+}
+
+// マス u が受け持つ期間(黒の誕生日からの日数で [最初, 最後])
+export function squarePeriod(u, D, N) {
+  let from = squareOffset(u, D, N);
+  let to = from;
+  while (from > 0 && squareOfOffset(from - 1, D, N) === u) from -= 1;
+  while (to < D && squareOfOffset(to + 1, D, N) === u) to += 1;
+  return [from, to];
+}
+
 // 開始日から過去へさかのぼって最初に出てくる誕生日の人が黒、未来へ進んで最初に出てくる誕生日の人が白。
 export function setupMatch(players, start, rng = Math.random) {
   if (!Number.isFinite(start)) return { error: '開始日を入力してください。' };
@@ -61,6 +87,8 @@ export function setupMatch(players, start, rng = Math.random) {
   const baseDay = prevOccurrence(blackPlayer.birthday, start);
   const whiteDay = nextOccurrence(whitePlayer.birthday, start);
   const D = whiteDay - baseDay;
+  const { N, k } = dateLine(D);
+  const u0 = Math.min(N - 1, Math.max(1, squareOfOffset(start - baseDay, D, N)));
   return {
     black: { ...blackPlayer, day: baseDay },
     white: { ...whitePlayer, day: whiteDay },
@@ -69,6 +97,9 @@ export function setupMatch(players, start, rng = Math.random) {
     p0: start - baseDay,
     s: growthStep(D),
     sameBirthday,
+    N,
+    k,
+    u0,
   };
 }
 

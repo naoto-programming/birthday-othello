@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   dayNum, fromDayNum, weekday, birthdayInYear, prevOccurrence, nextOccurrence, growthStep,
   setupMatch, defaultStart, boardDates, formatMD, toISODate, parseISODate,
+  dateLine, squareOffset, squareOfOffset, squarePeriod,
 } from '../js/dates.js';
 
 const taro = { name: 'たろう', birthday: { m: 10, d: 14 } };
@@ -50,6 +51,9 @@ test('setupMatch: 過去側の誕生日の人が黒、未来側の人が白', ()
   assert.equal(m.p0, 25);
   assert.equal(m.s, 2);
   assert.equal(m.sameBirthday, false);
+  assert.equal(m.N, 25);
+  assert.equal(m.k, 2);
+  assert.equal(m.u0, 13);
 });
 
 test('setupMatch: 入力の順番を入れ替えても同じ', () => {
@@ -151,4 +155,64 @@ test('formatMD / toISODate / parseISODate', () => {
   assert.equal(formatMD(n), '3/5');
   assert.equal(toISODate(n), '2026-03-05');
   assert.equal(parseISODate('2026-03-05'), n);
+});
+
+test('dateLine: 30日以下は1マス=1日', () => {
+  assert.deepEqual(dateLine(2), { N: 2, k: 1 });
+  assert.deepEqual(dateLine(30), { N: 30, k: 1 });
+});
+
+test('dateLine: 30日を超えると1マス=k日で30マス以下', () => {
+  assert.deepEqual(dateLine(31), { N: 16, k: 2 });
+  assert.deepEqual(dateLine(50), { N: 25, k: 2 });
+  assert.deepEqual(dateLine(180), { N: 30, k: 6 });
+  assert.deepEqual(dateLine(365), { N: 28, k: 13 });
+  for (let D = 31; D <= 366; D++) assert.ok(dateLine(D).N <= 30, `D=${D}`);
+});
+
+test('squareOffset / squareOfOffset: 両端は誕生日、往復で同じマス', () => {
+  for (const D of [20, 31, 50, 180, 365]) {
+    const { N } = dateLine(D);
+    assert.equal(squareOffset(0, D, N), 0);
+    assert.equal(squareOffset(N, D, N), D);
+    for (let u = 0; u <= N; u++) assert.equal(squareOfOffset(squareOffset(u, D, N), D, N), u, `D=${D} u=${u}`);
+  }
+});
+
+test('squarePeriod: マスの期間がすき間なく並ぶ', () => {
+  for (const D of [20, 50, 180, 365]) {
+    const { N } = dateLine(D);
+    let next = 0;
+    for (let u = 0; u <= N; u++) {
+      const [from, to] = squarePeriod(u, D, N);
+      assert.equal(from, next, `D=${D} u=${u}`);
+      const center = squareOffset(u, D, N);
+      assert.ok(from <= center && center <= to, `D=${D} u=${u}`);
+      next = to + 1;
+    }
+    assert.equal(next, D + 1);
+  }
+});
+
+test('squarePeriod: 50日なら1マス2日', () => {
+  assert.deepEqual(squarePeriod(1, 50, 25), [1, 2]);
+  assert.deepEqual(squarePeriod(13, 50, 25), [25, 26]);
+});
+
+test('setupMatch: 開始マスは1〜N−1に収める', () => {
+  const a = { name: 'A', birthday: { m: 1, d: 1 } };
+  const b = { name: 'B', birthday: { m: 6, d: 30 } };
+  const early = setupMatch([a, b], dayNum(2026, 1, 2));
+  assert.equal(early.D, 180);
+  assert.equal(early.N, 30);
+  assert.equal(early.u0, 1);
+  const late = setupMatch([a, b], dayNum(2026, 6, 29));
+  assert.equal(late.u0, 29);
+});
+
+test('setupMatch: 同じ誕生日なら28マス(1マス=13日)', () => {
+  const bd = { m: 5, d: 5 };
+  const m = setupMatch([{ name: 'A', birthday: bd }, { name: 'B', birthday: bd }], dayNum(2026, 11, 1), () => 0);
+  assert.equal(m.N, 28);
+  assert.equal(m.k, 13);
 });
