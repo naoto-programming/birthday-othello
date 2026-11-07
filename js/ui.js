@@ -154,7 +154,9 @@ function renderBoard(state, shownP, preview) {
     const ev = eventByDay.get(day);
     if (ev) cell.classList.add(ev.used ? 'event-used' : 'event');
     if (targets.has(idx)) cell.classList.add('target');
-    if (day === destDay) cell.classList.add('dest');
+    // 日付が動かない予告(destDay === today)では、今日のマス自身を目的地として指し示す意味がないので dest を付けない。
+    // こうしないと is-today と dest が同じマスに重なり、金色の「今日」強調がピンクの dest 点滅に上書きされてしまう。
+    if (day === destDay && destDay !== today) cell.classList.add('dest');
     if (lineOf.has(idx)) cell.classList.add(lineOf.get(idx) ? 'line-on' : 'line-off');
     const stone = state.board[idx];
     if (stone) {

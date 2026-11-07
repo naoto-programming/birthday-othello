@@ -96,6 +96,8 @@ button { font: inherit; cursor: pointer; }
 .cell .date { position: absolute; top: 2px; left: 3px; font-size: clamp(0.55rem, 2.2vw, 0.7rem); color: var(--date-label); line-height: 1; }
 .cell.event { background: var(--event); }
 .cell.event::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: #ff9f1c; }
+/* 今日のマスでは右上を「今日」札が使うので、行事の点は札とぶつからない位置へ動かす */
+.cell.is-today.event::after { top: auto; bottom: 3px; }
 .cell.event-used { background: var(--event-used); }
 .cell.bday-black { background: var(--bday-black); }
 .cell.bday-white { background: var(--bday-white); }
@@ -115,6 +117,12 @@ button { font: inherit; cursor: pointer; }
 }
 .cell.dest { animation: dest-blink 0.7s ease-in-out infinite alternate; }
 .cell.target { box-shadow: inset 0 0 0 3px var(--accent); animation: pulse 0.8s infinite alternate; }
+/* 今日のマスが選べる対象でもあるとき: 金色の縁取りと緩い点滅は常に残し、内側にピンクの選択リングを足す。
+   3クラス分のセレクタ(詳細度0,3,0)にして、.cell.is-today / .cell.target の並び順に関係なく勝たせる。 */
+.cell.is-today.target {
+  box-shadow: inset 0 0 0 4px var(--today), inset 0 0 0 7px var(--accent);
+  animation: today-pulse 1.6s ease-in-out infinite;
+}
 .cell.line-on { box-shadow: inset 0 0 0 2px var(--accent); }
 .cell.line-off::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--muted); border-radius: 4px; pointer-events: none; }
 .cell.last .stone { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -170,6 +178,6 @@ dialog::backdrop { background: rgba(58, 46, 42, 0.45); }
 
 @media (prefers-reduced-motion: reduce) {
   .stone.flip, .stone.placed, .stone.ghost, .cell.target, .cell.is-today, .cell.dest,
-  .cell.line-on .stone.will-flip, .confetti span { animation: none; }
+  .cell.is-today.target, .cell.line-on .stone.will-flip, .confetti span { animation: none; }
   .pl { transition: none; }
 }

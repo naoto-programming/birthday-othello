@@ -112,6 +112,15 @@ async function scenarios() {
   check(await js(`document.querySelector('#board .cell[data-idx="27"] .stone.ghost') !== null`), '予告の半透明の石が出ていません');
   check(!(await js(`document.querySelector('#preview-panel').hidden`)), '予告パネルが出ていません');
   check(await panelText().then((t) => t.includes('挟める手がない')), `空の盤面での予告文がおかしいです: ${await panelText()}`);
+  // 日付が動かない予告(今のマスのまま)では、今日のマスの金色の点滅がピンクの dest 点滅などに上書きされてはいけない
+  check(
+    (await js(`getComputedStyle(document.querySelector('#board .cell.is-today')).animationName`)).includes('today-pulse'),
+    '日付が動かない予告中、今日のマスの金色の点滅が消えています',
+  );
+  check(
+    await js(`document.querySelector('#board .cell.is-today').classList.contains('dest')`) === false,
+    '日付が動かない予告で、今日のマス自身が dest 扱いになっています',
+  );
   await tapCell(36);
   check(await stoneCount() === 0, '別のマスをタップしただけで石が置かれています');
   check(await js(`document.querySelector('#board .cell[data-idx="36"] .stone.ghost') !== null`), '予告が別のマスに切り替わっていません');
