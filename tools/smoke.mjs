@@ -176,6 +176,11 @@ async function scenarios() {
   await tapCell(29);
   check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 2, '2つの列が予告されていません');
   check(await panelText().then((t) => t.includes('2枚返して')), `2列を返す予告文になっていません: ${await panelText()}`);
+  // 予告中は直前手(37、この一つ前の playCell)のマーカー(last)を出さない(will-flip のピンクのリングと紛らわしいため)
+  check(
+    !(await js(`document.querySelector('#board .cell[data-idx="37"]').classList.contains('last')`)),
+    '予告中に直前手のマーカー(last)が残っています',
+  );
   await tapCell(37);
   check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 1, '列の石をタップしても列が外れません');
   check(await js(`document.querySelectorAll('#board .cell.line-off').length`) === 1, '外した列が点線になっていません');
@@ -187,6 +192,7 @@ async function scenarios() {
   await settled();
   check(await js(`document.querySelector('#board .cell[data-idx="28"] .stone').classList.contains('black')`), '選んだ列の石が返っていません');
   check(await js(`document.querySelector('#board .cell[data-idx="37"] .stone').classList.contains('white')`), '外した列の石まで返っています');
+  check(await js(`document.querySelector('#board .cell[data-idx="29"]').classList.contains('last')`), '決定後、直前手のマーカー(last)が付いていません');
   await tapCell(0);
   await js(`document.querySelector('#preview-panel [data-pv="cancel"]').click()`);
   check(await js(`document.querySelector('#preview-panel').hidden`), '「やめる」で予告が消えません');
@@ -370,6 +376,34 @@ async function scenarios() {
   // どちらとも明確に離れた 3000ms をしきい値にする(石を返す演出 約1100ms を含む)。
   check(dateAnimMs < 3000, `日付が動く演出(月またぎ+跳ね返り)が長すぎます: ${dateAnimMs}ms`);
 
+  // 14b. 動きを減らす設定では、上と同じ手(月またぎ+跳ね返りを含む)でも、フリップの一時停止・日付のコマ送り・
+  // ページめくり・跳ね返りの待ちがすべて省かれてすぐ終わる(待ちのどれかが wait() の代わりに sleep() を
+  // 使ってしまう退行を検知する。scenario 11 は0フリップの最初の1手しか見ていないので、ここで別途確かめる)
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const reducedDateAnimMs = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'くろ', birthday: { m: 10, d: 14 } }, { name: 'しろ', birthday: { m: 12, d: 3 } }],
+      dates.dayNum(2026, 11, 3),
+    );
+    let st = rules.newGame(match);
+    st = { ...st, board: st.board.slice() };
+    st.board[30] = { color: 'B', flips: 0 };
+    for (const i of [25, 26, 27, 28, 29]) st.board[i] = { color: 'W', flips: 2 };
+    st.turn = 'B';
+    const next = rules.playMove(st, 24);
+    const t0 = performance.now();
+    await ui.animateMove(next);
+    return performance.now() - t0;
+  })()`);
+  check(
+    reducedDateAnimMs < 150,
+    `動きを減らす設定でも、月またぎ+跳ね返りを含む手の演出に ${reducedDateAnimMs}ms かかっています(wait() の代わりに sleep() を使っている可能性)`,
+  );
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
   // 15. 勝利の花火が流れている間に「設定に戻る」で中断しても、古い対戦の結果ダイアログを開こうとしてエラーにならない
   await open(390, 844);
   await fillSetup({ name: 'くろ', m: 10, d: 28 }, { name: 'しろ', m: 10, d: 30 });
@@ -393,6 +427,59 @@ async function scenarios() {
     pageErrors.length === errorsBeforeQuit,
     `花火の演出中に中断するとページのエラーが発生します: ${JSON.stringify(pageErrors.slice(errorsBeforeQuit))}`,
   );
+
+  // 16. 今日のマスの金色の枠(I1: 動きを減らす設定での行き先の印、I2: 予告の列が今日のマスを通るとき)。
+  // 本物の対局の流れでは今日のマスと列の通り道を重ねにくいので、rules.js/dates.js で専用の盤面を直接組み立てる。
+  // baseDay=1/1・N=D=30・p=28 なら今日は1/29(idx 28)。idx 28 を 黒27・白28・白37・黒45 で (3,5)=29 に黒を置く
+  // (rules.test.js の TWO_LINES と同じ並び)と、今日のマス(idx 28)自身が予告の列(line-on)になり、
+  // 行き先(idx 26, 1/27)は今日とは別のマスになる。
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 10, d: 14 }, { name: 'しろ', m: 12, d: 3 });
+  await startFromSetup();
+  const todayLineDest = await js(`(async () => {
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const baseDay = dates.dayNum(2026, 1, 1);
+    const match = {
+      black: { name: 'くろ', birthday: { m: 1, d: 1 }, day: baseDay },
+      white: { name: 'しろ', birthday: { m: 1, d: 31 }, day: baseDay + 30 },
+      baseDay, D: 30, N: 30, k: 1, u0: 28, sameBirthday: false,
+    };
+    let state = rules.newGame(match);
+    state = { ...state, board: state.board.slice() };
+    state.board[27] = { color: 'B', flips: 0, fixed: false };
+    state.board[28] = { color: 'W', flips: 0, fixed: false };
+    state.board[37] = { color: 'W', flips: 0, fixed: false };
+    state.board[45] = { color: 'B', flips: 0, fixed: false };
+    const preview = rules.previewMove(state, 29);
+    ui.renderGame(state, { preview });
+    const todayCell = document.querySelector('#board .cell.is-today');
+    const destCell = document.querySelector('#board .cell.dest');
+    return {
+      todayIdx: todayCell?.dataset.idx ?? null,
+      todayLineOn: todayCell?.classList.contains('line-on') ?? false,
+      todayShadow: todayCell ? getComputedStyle(todayCell).boxShadow : null,
+      destIdx: destCell?.dataset.idx ?? null,
+      destShadow: destCell ? getComputedStyle(destCell).boxShadow : null,
+    };
+  })()`);
+  check(
+    todayLineDest.todayIdx === '28' && todayLineDest.destIdx === '26',
+    `想定した今日(idx 28)・行き先(idx 26)のマスになっていません: ${JSON.stringify(todayLineDest)}`,
+  );
+  check(todayLineDest.todayLineOn, `今日のマスが予告の列(line-on)になっていません: ${JSON.stringify(todayLineDest)}`);
+  check(
+    Boolean(todayLineDest.todayShadow) && todayLineDest.todayShadow.includes('rgb(255, 183, 3)'),
+    `動きを減らす設定で、予告の列が通る今日のマスから金色の枠が消えています: ${todayLineDest.todayShadow}`,
+  );
+  check(
+    Boolean(todayLineDest.destShadow) && todayLineDest.destShadow !== 'none',
+    `動きを減らす設定で、行き先のマスの印(box-shadow)が none になっています: ${todayLineDest.destShadow}`,
+  );
+  await shot('reduced-today-line-dest');
+  await send('Emulation.setEmulatedMedia', { features: [] });
 
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();

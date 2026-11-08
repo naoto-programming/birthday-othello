@@ -123,6 +123,14 @@ button { font: inherit; cursor: pointer; }
   box-shadow: inset 0 0 0 4px var(--today), inset 0 0 0 7px var(--accent);
   animation: today-pulse 1.6s ease-in-out infinite;
 }
+/* 今日のマスが、予告中の列(返す/返さない)の通り道でもあるとき: .cell.line-on と同じ詳細度(0,2,0)で
+   source順が勝ってしまい金色の枠が消えるため、.cell.is-today.target と同様に組み合わせ専用のルールで勝たせる。
+   .cell.dest は renderBoard 側で today のマスには付けないので(destDay !== today の条件)、is-today との
+   組み合わせはそもそも起きない。 */
+.cell.is-today.line-on {
+  box-shadow: inset 0 0 0 4px var(--today), inset 0 0 0 6px var(--accent);
+  animation: today-pulse 1.6s ease-in-out infinite;
+}
 .cell.line-on { box-shadow: inset 0 0 0 2px var(--accent); }
 .cell.line-off::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--muted); border-radius: 4px; pointer-events: none; }
 .cell.last .stone { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -219,5 +227,8 @@ dialog::backdrop { background: rgba(58, 46, 42, 0.45); }
   .stone.placed, .stone.ghost, .stone.flip-to-black, .stone.flip-to-white, .stone.vanish, .stone.glow-gold,
   .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.bounce, .cell.line-on .stone.will-flip,
   .board.page-turn, .pl.glow, dialog[open], .cake .flame, .confetti span { animation: none; }
+  /* .cell.dest は点滅アニメーションでしか枠を出していないため、上の animation: none だけでは
+     行き先マスの印が完全に消えてしまう。動きを止めても印は残るよう、静止した枠を出す。 */
+  .cell.dest { box-shadow: inset 0 0 0 4px var(--accent); }
   .pl { transition: none; }
 }
