@@ -4,6 +4,10 @@ import { defaultStart, setupMatch } from '../js/dates.js';
 import { applyChoice, choiceTargets, flipLines, newGame, playMove, previewMove } from '../js/rules.js';
 
 const GAMES = Number(process.argv[2] ?? 200);
+if (!Number.isInteger(GAMES) || GAMES <= 0) {
+  console.error(`NG: 対局数は正の整数で指定してください: ${process.argv[2]}`);
+  process.exit(1);
+}
 const PASS_RANGE = [0.6, 0.9];
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 

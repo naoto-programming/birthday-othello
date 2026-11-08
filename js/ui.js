@@ -170,7 +170,8 @@ function renderBoard(state, shownP, preview) {
     } else if (preview && idx === preview.idx) {
       cell.append(span(`stone ghost ${state.turn === 'B' ? 'black' : 'white'}`, '1'));
     }
-    if (state.lastMove?.idx === idx) cell.classList.add('last');
+    // 予告中は直前手のマーカーを出さない。予告中の will-flip のピンクのリングと見分けがつかなくなるため。
+    if (!preview && state.lastMove?.idx === idx) cell.classList.add('last');
     cell.setAttribute('aria-label', `${formatMD(day)} ${stone ? `${COLOR_NAME[stone.color]}の石` : '空き'}`);
     return cell;
   });
@@ -188,12 +189,17 @@ function renderPreviewPanel(state, preview) {
   let main;
   if (preview.stall) main = `返さない: 相手側へ1マス → ${dest}`;
   else if (preview.flips.length === 0) main = '返さない: 挟める手がないので日付は動かない';
-  else if (preview.days === 0) main = `${preview.flips.length}枚返す: 日付は動かない(おやすみ)`;
-  else main = `${preview.flips.length}枚返して${preview.days}マス動く → ${dest}`;
+  else if (preview.days === 0) {
+    // 日付が動かない0マスは、おやすみが理由のときと、調整で0マスを選んだときの両方で起こりうる。
+    const reason = state.pending[state.turn].rest ? 'おやすみ' : '調整で0マス';
+    main = `${preview.flips.length}枚返す: 日付は動かない(${reason})`;
+  } else main = `${preview.flips.length}枚返して${preview.days}マス動く → ${dest}`;
   const notes = [];
   if (preview.bounced) notes.push('誕生日を通り越して跳ね返ります');
-  if (preview.win) notes.push(`${playerOf(state, preview.win).name}の誕生日にぴったり!`);
-  else if (preview.event) notes.push(`${preview.event.occasion}「${preview.event.name}」に止まります`);
+  if (preview.win) {
+    const winNote = `${playerOf(state, preview.win).name}の誕生日にぴったり!`;
+    notes.push(preview.win === state.turn ? winNote : `${winNote}(相手の勝ちになります)`);
+  } else if (preview.event) notes.push(`${preview.event.occasion}「${preview.event.name}」に止まります`);
   if (preview.lines.length > 1) notes.push('列の石をタップすると、その列を返すかどうかを切り替えられます');
   const children = [span('pv-main', main), ...notes.map((text) => span('pv-note', text))];
   if (preview.needsAdjust) {

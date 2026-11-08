@@ -226,6 +226,15 @@ test('previewMove: 調整は返す石があるときだけ', () => {
   assert.equal(previewMove(st, at(7, 7), { adjust: 2 }).needsAdjust, false);
 });
 
+test('previewMove: おやすみが予定されているときは調整があっても調整ボタンを出さない', () => {
+  const st = stateWith({ p: 10, rows: rowsWith('.WB.....') });
+  st.pending.B.adjust = true;
+  st.pending.B.rest = true;
+  const pv = previewMove(st, at(3, 0), { adjust: 2 });
+  assert.equal(pv.needsAdjust, false);
+  assert.equal(pv.days, 0, 'おやすみなので調整に関わらず動くマス数は0');
+});
+
 // ---- 打つ ----
 
 test('playMove: 予告と同じ結果になり、選ばなかった列は返らない', () => {

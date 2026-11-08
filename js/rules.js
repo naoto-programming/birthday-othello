@@ -114,7 +114,9 @@ export function previewMove(state, idx, options = {}) {
   if (chosen.length === 0) chosen = available;
   const flips = lines.filter((line) => chosen.includes(line.dir)).flatMap((line) => line.cells);
   const base = flips.reduce((sum, i) => sum + stoneWeight(state.board[i]), 0);
-  const needsAdjust = pending.adjust && base > 0;
+  // おやすみが予定されているときは、調整の値に関わらず moveDays が動くマス数を0にするので、
+  // 調整ボタンを出さない(出しても選んでも効果がなく、紛らわしいため)。
+  const needsAdjust = pending.adjust && base > 0 && !pending.rest;
   const adjust = needsAdjust ? Math.max(-3, Math.min(3, options.adjust ?? 0)) : 0;
   const penalty = base === 0 && canFlipAnywhere(state.board, color);
   const { days, dir, stall } = moveDays(base, pending, color, adjust, penalty);
