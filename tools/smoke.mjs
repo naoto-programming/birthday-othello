@@ -219,7 +219,12 @@ async function scenarios() {
   check(await playToEnd(), '最後まで打っても結果が出ません');
   const title = await js(`document.querySelector('#result-title').textContent`);
   check(title.includes('お誕生日おめでとう') || title.includes('引き分け'), `結果の見出しがおかしいです: ${title}`);
+  // 「動きを減らす」設定では紙吹雪が落ちてこない(.confetti span の fall アニメーションで初めて
+  // ダイアログ内に入る)ため、結果のスクリーンショットだけは通常の動きに戻し、紙吹雪が落ちてきてから撮る
+  await send('Emulation.setEmulatedMedia', { features: [] });
+  await sleep(600);
   await shot('phone-result');
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await js(`document.querySelector('#result-dialog button[value=rematch]').click()`);
   await waitFor(`!document.querySelector('#result-dialog').open && document.querySelectorAll('#board .stone').length === 0`, 3000).catch(() => {});
   check(await stoneCount() === 0, '再戦で盤面が空になっていません');
@@ -234,6 +239,8 @@ async function scenarios() {
   await startFromSetup();
   check(await playToEnd(), '半年離れた誕生日で最後まで打っても結果が出ません');
   await send('Emulation.setEmulatedMedia', { features: [] });
+  // 通常の動きに戻した瞬間からダイアログの pop-in(0.35秒)が始まるので、出きってから撮る
+  await sleep(500);
   await shot('small-result');
 
   // 8. ルール画面
