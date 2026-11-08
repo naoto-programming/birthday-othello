@@ -225,7 +225,7 @@ dialog::backdrop { background: rgba(58, 46, 42, 0.45); }
 
 @media (prefers-reduced-motion: reduce) {
   .stone.placed, .stone.ghost, .stone.flip-to-black, .stone.flip-to-white, .stone.vanish, .stone.glow-gold,
-  .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.bounce, .cell.line-on .stone.will-flip,
+  .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.is-today.line-on, .cell.bounce, .cell.line-on .stone.will-flip,
   .board.page-turn, .pl.glow, dialog[open], .cake .flame, .confetti span { animation: none; }
   /* .cell.dest は点滅アニメーションでしか枠を出していないため、上の animation: none だけでは
      行き先マスの印が完全に消えてしまう。動きを止めても印は残るよう、静止した枠を出す。 */

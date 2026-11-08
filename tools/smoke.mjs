@@ -461,6 +461,7 @@ async function scenarios() {
       todayIdx: todayCell?.dataset.idx ?? null,
       todayLineOn: todayCell?.classList.contains('line-on') ?? false,
       todayShadow: todayCell ? getComputedStyle(todayCell).boxShadow : null,
+      todayAnimationName: todayCell ? getComputedStyle(todayCell).animationName : null,
       destIdx: destCell?.dataset.idx ?? null,
       destShadow: destCell ? getComputedStyle(destCell).boxShadow : null,
     };
@@ -473,6 +474,10 @@ async function scenarios() {
   check(
     Boolean(todayLineDest.todayShadow) && todayLineDest.todayShadow.includes('rgb(255, 183, 3)'),
     `動きを減らす設定で、予告の列が通る今日のマスから金色の枠が消えています: ${todayLineDest.todayShadow}`,
+  );
+  check(
+    todayLineDest.todayAnimationName === 'none',
+    `動きを減らす設定でも、列に入った今日のマスが脈打っています: ${todayLineDest.todayAnimationName}`,
   );
   check(
     Boolean(todayLineDest.destShadow) && todayLineDest.destShadow !== 'none',
