@@ -167,9 +167,9 @@ button { font: inherit; cursor: pointer; }
 @keyframes vanish { to { opacity: 0; transform: scale(0.3) rotate(25deg); } }
 .stone.glow-gold { animation: glow-gold 1s ease; }
 @keyframes glow-gold { 40% { box-shadow: 0 0 0 4px #ffd166, 0 0 14px 4px rgba(255, 209, 102, 0.9); transform: scale(1.12); } }
-.board.page-turn { animation: page-turn 0.32s ease-in-out; transform-origin: top center; }
+.board.page-turn { animation: page-turn 0.25s ease-in-out; transform-origin: top center; }
 @keyframes page-turn { 50% { transform: perspective(600px) rotateX(70deg); opacity: 0.4; } }
-.cell.bounce { animation: bounce-cell 0.25s ease; }
+.cell.bounce { animation: bounce-cell 0.2s ease; }
 @keyframes bounce-cell { 50% { transform: scale(0.8); } }
 .pl.glow { animation: glow 1.2s ease; }
 @keyframes glow { 30% { box-shadow: 0 0 0 4px #ffd166, 0 0 16px 4px rgba(255, 209, 102, 0.8); } }
