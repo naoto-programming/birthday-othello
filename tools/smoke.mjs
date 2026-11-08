@@ -211,6 +211,11 @@ async function scenarios() {
   check(await todayText() === '10月29日', `2倍が効いた後の日付が 10月29日 ではありません: ${await todayText()}`);
 
   // 6. 最後まで打って結果を出し、再戦 → 2回目は Esc 相当で閉じて設定に戻る
+  // playToEnd() は何十手も自動で打ち続けるため実時間のタイマーに依存する時間が長くなる。
+  // ヘッドレス Chrome のタイマー配送が(App Nap 等で)たまに大きく遅延すると settled() が
+  // 本物のタイムアウトで落ちることがあるため、シナリオ6・7の自動進行中は「動きを減らす」設定にして
+  // wait() を即解決させ、celebrate() の花火も省いて、タイマー配送に依存しないようにする。
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   check(await playToEnd(), '最後まで打っても結果が出ません');
   const title = await js(`document.querySelector('#result-title').textContent`);
   check(title.includes('お誕生日おめでとう') || title.includes('引き分け'), `結果の見出しがおかしいです: ${title}`);
@@ -228,6 +233,7 @@ async function scenarios() {
   await fillSetup({ name: 'あいうえおかきくけこ', m: 1, d: 1 }, { name: 'さしすせそたちつてと', m: 7, d: 1 });
   await startFromSetup();
   check(await playToEnd(), '半年離れた誕生日で最後まで打っても結果が出ません');
+  await send('Emulation.setEmulatedMedia', { features: [] });
   await shot('small-result');
 
   // 8. ルール画面
