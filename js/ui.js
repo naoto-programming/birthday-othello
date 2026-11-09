@@ -351,6 +351,10 @@ const TURN_MS = 250;
 const BOUNCE_MS = 200;
 const HOLD_MS = 300;
 const DATE_ANIM_BUDGET_MS = 1500;
+// 1手の中でページめくりの演出をするのは最大この回数まで。1マスが何日分もある対戦では月替わりが
+// 何度も起きうるが、毎回めくっていると合計がすぐ1.5秒の枠を超えてしまうため、3回目以降は
+// めくらずに表示を切り替えるだけにする。
+const MAX_PAGE_TURNS = 2;
 
 async function animateDate(state, fromP, dir, days, { isCurrent }) {
   if (days <= 0) return;
@@ -373,17 +377,22 @@ async function animateDate(state, fromP, dir, days, { isCurrent }) {
     }
     path.push({ raw, p, hit });
   }
-  const extras = turns * TURN_MS + (bounced ? BOUNCE_MS + HOLD_MS : 0);
+  // 予算の計算も、実際にめくる回数(最大 MAX_PAGE_TURNS 回)で数える
+  const extras = Math.min(turns, MAX_PAGE_TURNS) * TURN_MS + (bounced ? BOUNCE_MS + HOLD_MS : 0);
   const frameMs = Math.max(15, Math.min(80, (DATE_ANIM_BUDGET_MS - extras) / frames));
   month = fromDayNum(dateOf(state, fromP)).m;
   let bouncedSoFar = false;
+  let turnsDone = 0;
   for (const { raw, p, hit } of path) {
     if (!isCurrent()) return;
     const m = fromDayNum(dateOf(state, p)).m;
     if (m !== month) {
       month = m;
-      await turnPage(TURN_MS);
-      if (!isCurrent()) return;
+      if (turnsDone < MAX_PAGE_TURNS) {
+        turnsDone += 1;
+        await turnPage(TURN_MS);
+        if (!isCurrent()) return;
+      }
     }
     renderGame(state, { shownP: p });
     bouncedSoFar ||= hit;

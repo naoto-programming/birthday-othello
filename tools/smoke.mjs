@@ -523,6 +523,36 @@ async function scenarios() {
   check(await js(`document.querySelector('#preview-panel').hidden`), '確定後も予告パネルが残っています');
   check(await js(`document.querySelector('#status-white').classList.contains('active')`), '鬼は外の確定後、白の番になっていません');
 
+  // 18. 離れた誕生日でも、日付の演出(ページめくりが何度も起きる手)が約1.5秒に収まる(既存のシナリオ14と同じ組み方)。
+  // 同じ誕生日(5/5 と 5/5)で D=365, N=28, k=13(1マス=約13日)。黒が idx28 に打ち、白(idx29、flips=19→重さ20)を
+  // 返して20マス動く(p=24→p=4)。1マスが13日なので、月替わりが何度も起きる(ページめくりは最大2回までに制限する)。
+  await open(390, 844);
+  await fillSetup({ name: 'いつき', m: 5, d: 5 }, { name: 'いつみ', m: 5, d: 5 });
+  await startFromSetup();
+  const manyMonthsMs = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'いつき', birthday: { m: 5, d: 5 } }, { name: 'いつみ', birthday: { m: 5, d: 5 } }],
+      dates.dayNum(2026, 11, 4),
+      () => 0,
+    );
+    let st = rules.newGame(match);
+    st = { ...st, board: st.board.slice() };
+    st.board[30] = { color: 'B', flips: 0 };
+    st.board[29] = { color: 'W', flips: 19 };
+    st.turn = 'B';
+    st.p = 24;
+    const next = rules.playMove(st, 28);
+    const t0 = performance.now();
+    await ui.animateMove(next);
+    return performance.now() - t0;
+  })()`);
+  // 石を返す演出 ≈ 780ms(1枚返す)+ 日付 ≈ 1500ms(めくり最大2回分の予算込み)で、2600ms未満のはず。
+  // 直す前はページめくり(月替わりごとに毎回250ms)がそのまま積み重なり、約3300msになる見込み。
+  check(manyMonthsMs < 2600, `1マスが何日分もある対戦で、日付の演出が長すぎます: ${manyMonthsMs}ms`);
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
