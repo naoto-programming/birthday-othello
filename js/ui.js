@@ -93,18 +93,23 @@ export function renderSetupPreview(match) {
 // ---- 対戦画面 ----
 
 // shownP: 表示する日付のマス(演出中に途中の日付を出すため)、preview: 予告中の手(previewMove の戻り値)、
-// choicePick: 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス
-export function renderGame(state, { shownP = state.p, preview = null, choicePick = null } = {}) {
+// choicePick: 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス、
+// turnOverride: 手番の表示・名札の光りに使う色(石が裏返る演出の間、打った人のままにするため)、
+// beforeFlip: この演出の間だけ、裏返る前の重さ(新しい重さ−1)で見せる石のマス
+export function renderGame(state, {
+  shownP = state.p, preview = null, choicePick = null, turnOverride = null, beforeFlip = null,
+} = {}) {
+  const turn = turnOverride ?? state.turn;
   $('#today-date').textContent = formatLong(dateOf(state, shownP));
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
-  renderPlayerStatus($('#status-black'), state, 'B', shownP);
-  renderPlayerStatus($('#status-white'), state, 'W', shownP);
-  $('#turn-msg').textContent = turnMessage(state, preview, choicePick);
-  renderBoard(state, shownP, preview, choicePick);
+  renderPlayerStatus($('#status-black'), state, 'B', shownP, turn);
+  renderPlayerStatus($('#status-white'), state, 'W', shownP, turn);
+  $('#turn-msg').textContent = turnMessage(state, preview, choicePick, turn);
+  renderBoard(state, shownP, preview, choicePick, beforeFlip);
   renderPreviewPanel(state, preview, choicePick);
 }
 
-function renderPlayerStatus(el, state, color, shownP) {
+function renderPlayerStatus(el, state, color, shownP, turn) {
   const { match } = state;
   const player = playerOf(state, color);
   const squares = color === 'B' ? shownP : match.N - shownP;
@@ -113,7 +118,7 @@ function renderPlayerStatus(el, state, color, shownP) {
   const effects = Object.entries(state.pending[color])
     .filter(([, on]) => on)
     .map(([id]) => EFFECTS[id].name);
-  el.classList.toggle('active', state.phase !== 'over' && state.turn === color);
+  el.classList.toggle('active', state.phase !== 'over' && turn === color);
   el.replaceChildren(
     span('pl-name', `${COLOR_NAME[color]} ${player.name}`),
     span('pl-bday', `誕生日 ${formatMD(player.day)}`),
@@ -122,10 +127,10 @@ function renderPlayerStatus(el, state, color, shownP) {
   if (effects.length) el.append(span('pl-effects', `次の手: ${effects.join('・')}`));
 }
 
-function turnMessage(state, preview, choicePick) {
+function turnMessage(state, preview, choicePick, turn) {
   if (state.phase === 'over') return '対戦終了';
-  const player = playerOf(state, state.turn);
-  const who = `${player.name}(${COLOR_NAME[state.turn]})`;
+  const player = playerOf(state, turn);
+  const who = `${player.name}(${COLOR_NAME[turn]})`;
   if (state.phase === 'choose') {
     return choicePick !== null ? `${who}: 確かめて「決定」` : `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
   }
@@ -133,7 +138,7 @@ function turnMessage(state, preview, choicePick) {
   return `${who}の番です`;
 }
 
-function renderBoard(state, shownP, preview, choicePick) {
+function renderBoard(state, shownP, preview, choicePick, beforeFlip) {
   const { match } = state;
   const today = dateOf(state, shownP);
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
@@ -175,7 +180,9 @@ function renderBoard(state, shownP, preview, choicePick) {
       const classes = ['stone', stone.color === 'B' ? 'black' : 'white'];
       if (stone.fixed) classes.push('fixed');
       if (willFlip.has(idx)) classes.push('will-flip');
-      const el = span(classes.join(' '), String(stoneWeight(stone)));
+      // 裏返る演出の間は、裏返り後の重さではなく裏返る前の重さ(新しい重さ−1)を見せる
+      const weight = beforeFlip?.includes(idx) ? stoneWeight(stone) - 1 : stoneWeight(stone);
+      const el = span(classes.join(' '), String(weight));
       if (lineOf.get(idx)) el.style.animationDelay = `${cellDistance(idx, preview.idx) * 120}ms`;
       cell.append(el);
     } else if (preview && idx === preview.idx) {
@@ -327,7 +334,10 @@ function launchConfetti(container) {
 // isCurrent: 呼び出し側の対戦がまだ有効かどうか。中断されていたら残りの演出と最後の再描画を打ち切る。
 export async function animateMove(state, { isCurrent = () => true } = {}) {
   const move = state.lastMove;
-  renderGame(state, { shownP: move.fromP });
+  // 石が落ちて裏返る間(日付が動く演出の間も)は、打った人の名札を光らせたまま、裏返る石は
+  // 裏返る前の重さで見せる。演出が終わったときの最後の描画(関数末尾)で、次の手番と新しい重さに切り替える。
+  const overlay = { turnOverride: move.color, beforeFlip: move.flips };
+  renderGame(state, { shownP: move.fromP, ...overlay });
   $(`#board .cell[data-idx="${move.idx}"] .stone`)?.classList.add('placed');
   const order = [...move.flips].sort((a, b) => cellDistance(a, move.idx) - cellDistance(b, move.idx));
   order.forEach((idx, i) => {
@@ -338,7 +348,7 @@ export async function animateMove(state, { isCurrent = () => true } = {}) {
   });
   await wait(order.length ? 300 + order.length * 80 + 400 : 450);
   if (!isCurrent()) return;
-  await animateDate(state, move.fromP, move.dir, move.days, { isCurrent });
+  await animateDate(state, move.fromP, move.dir, move.days, { isCurrent, ...overlay });
   if (!isCurrent()) return;
   // 「真ん中へ」で飛んだ先は、イベントのポップアップを閉じたあとで表示する
   renderGame(state, { shownP: move.toP });
@@ -356,7 +366,7 @@ const DATE_ANIM_BUDGET_MS = 1500;
 // めくらずに表示を切り替えるだけにする。
 const MAX_PAGE_TURNS = 2;
 
-async function animateDate(state, fromP, dir, days, { isCurrent }) {
+async function animateDate(state, fromP, dir, days, { isCurrent, turnOverride = null, beforeFlip = null }) {
   if (days <= 0) return;
   const { N } = state.match;
   const frames = Math.min(days, 30);
@@ -394,7 +404,7 @@ async function animateDate(state, fromP, dir, days, { isCurrent }) {
         if (!isCurrent()) return;
       }
     }
-    renderGame(state, { shownP: p });
+    renderGame(state, { shownP: p, turnOverride, beforeFlip });
     bouncedSoFar ||= hit;
     if (bouncedSoFar) $('#turn-msg').textContent = '跳ね返り!';
     if (hit) {

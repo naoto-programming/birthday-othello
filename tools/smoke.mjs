@@ -188,11 +188,28 @@ async function scenarios() {
   await tapCell(28);
   check(await js(`document.querySelectorAll('#board .cell.line-on').length`) === 1, '最後の1列が外れてしまいました');
   await shot('phone-lines');
-  await js(`document.querySelector('#preview-panel [data-pv="confirm"]').click()`);
+  // 「ここに置く」を押すのと同じ js 呼び出しの中で、すぐに次を読み取る。石が落ちて裏返る間(日付が動く演出の間も)は、
+  // 打った人(黒)の名札を光らせたまま、裏返る石(28)の数字も返る前の重さ('1')のままのはず。
+  const duringFlip = await js(`(() => {
+    document.querySelector('#preview-panel [data-pv="confirm"]').click();
+    return {
+      blackActive: document.querySelector('#status-black').classList.contains('active'),
+      stone28: document.querySelector('#board .cell[data-idx="28"] .stone')?.textContent,
+    };
+  })()`);
+  check(duringFlip.blackActive, '石が裏返る間、黒の名札が光ったままになっていません');
+  check(duringFlip.stone28 === '1', `石が裏返る間、28の石の数字が裏返る前の重さ'1'になっていません: ${duringFlip.stone28}`);
   await settled();
   check(await js(`document.querySelector('#board .cell[data-idx="28"] .stone').classList.contains('black')`), '選んだ列の石が返っていません');
   check(await js(`document.querySelector('#board .cell[data-idx="37"] .stone').classList.contains('white')`), '外した列の石まで返っています');
   check(await js(`document.querySelector('#board .cell[data-idx="29"]').classList.contains('last')`), '決定後、直前手のマーカー(last)が付いていません');
+  // 演出が終わったときの描画で、次の手番(白)と新しい重さ('2')に切り替わっている
+  const afterFlip = await js(`(() => ({
+    whiteActive: document.querySelector('#status-white').classList.contains('active'),
+    stone28: document.querySelector('#board .cell[data-idx="28"] .stone')?.textContent,
+  }))()`);
+  check(afterFlip.whiteActive, '演出が終わった後、白の番になっていません');
+  check(afterFlip.stone28 === '2', `演出が終わった後、28の石の数字が新しい重さ'2'になっていません: ${afterFlip.stone28}`);
   await tapCell(0);
   await js(`document.querySelector('#preview-panel [data-pv="cancel"]').click()`);
   check(await js(`document.querySelector('#preview-panel').hidden`), '「やめる」で予告が消えません');
