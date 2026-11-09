@@ -601,6 +601,39 @@ async function scenarios() {
   // 直す前はページめくり(月替わりごとに毎回250ms)がそのまま積み重なり、約3300msになる見込み。
   check(manyMonthsMs < 2600, `1マスが何日分もある対戦で、日付の演出が長すぎます: ${manyMonthsMs}ms`);
 
+  // 19. 行き先(dest)と列の枠(line-on)が同じマスに重なったときの見た目。実際の対局でこの組み合わせを作るのは
+  // 手間なので、盤面に一時的に cell dest line-on のクラスを持つ要素を差し込んで computed style を読む。
+  await open(390, 844);
+  await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
+  await startFromSetup();
+  const insertProbe = `(() => {
+    const board = document.querySelector('#board');
+    const el = document.createElement('div');
+    el.className = 'cell dest line-on';
+    el.style.gridColumn = '4';
+    el.style.gridRow = '4';
+    board.append(el);
+    const style = getComputedStyle(el);
+    return { animationName: style.animationName, boxShadow: style.boxShadow };
+  })()`;
+  const removeProbe = `document.querySelector('#board > .cell.dest.line-on')?.remove()`;
+  const destLineNormal = await js(insertProbe);
+  check(
+    destLineNormal.animationName === 'dest-line-blink',
+    `dest と line-on が重なったとき専用のアニメーションになっていません: ${destLineNormal.animationName}`,
+  );
+  check(destLineNormal.boxShadow !== 'none', `dest と line-on が重なったときの box-shadow が none です`);
+  await shot('dest-line-on');
+  await js(removeProbe);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const destLineReduced = await js(insertProbe);
+  check(
+    destLineReduced.boxShadow !== 'none',
+    `動きを減らす設定で、dest と line-on が重なったときの box-shadow が none です: ${destLineReduced.boxShadow}`,
+  );
+  await js(removeProbe);
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }

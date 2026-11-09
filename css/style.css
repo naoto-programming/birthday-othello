@@ -135,6 +135,10 @@ button { font: inherit; cursor: pointer; }
   animation: today-pulse 1.6s ease-in-out infinite;
 }
 .cell.line-on { box-shadow: inset 0 0 0 2px var(--accent); }
+/* 行き先(dest)の点滅が、予告中の列(line-on)の静的な2pxの枠を box-shadow ごと占有して消してしまうため、
+   同じマスに重なったときだけ専用の keyframes にする。2px(列の枠)〜5px(行き先の点滅)の間で点滅させ、
+   列の枠の太さを下限として保ったまま、行き先の点滅も重ねて見せる。 */
+.cell.dest.line-on { animation: dest-line-blink 0.7s ease-in-out infinite alternate; }
 .cell.line-off::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--muted); border-radius: 4px; pointer-events: none; }
 .cell.last .stone { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stone {
@@ -199,6 +203,7 @@ dialog[open] { animation: pop-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
 @keyframes pulse { from { box-shadow: inset 0 0 0 2px var(--accent); } to { box-shadow: inset 0 0 0 4px var(--accent); } }
 @keyframes today-pulse { 50% { box-shadow: inset 0 0 0 4px var(--today), inset 0 0 14px 4px rgba(255, 183, 3, 0.55); } }
 @keyframes dest-blink { from { box-shadow: inset 0 0 0 0 var(--accent); } to { box-shadow: inset 0 0 0 4px var(--accent); } }
+@keyframes dest-line-blink { from { box-shadow: inset 0 0 0 2px var(--accent); } to { box-shadow: inset 0 0 0 5px var(--accent); } }
 @keyframes ghost-pulse { from { transform: scale(0.9); } to { transform: scale(1); } }
 @keyframes line-glow { 50% { box-shadow: 0 0 0 3px var(--accent), 0 0 10px 3px rgba(232, 106, 146, 0.6); } }
 
@@ -228,10 +233,12 @@ dialog::backdrop { background: rgba(58, 46, 42, 0.45); }
 
 @media (prefers-reduced-motion: reduce) {
   .stone.placed, .stone.ghost, .stone.flip-to-black, .stone.flip-to-white, .stone.vanish, .stone.glow-gold,
-  .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.is-today.line-on, .cell.bounce, .cell.line-on .stone.will-flip,
+  .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.is-today.line-on, .cell.dest.line-on,
+  .cell.bounce, .cell.line-on .stone.will-flip,
   .board.page-turn, .pl.glow, dialog[open], .cake .flame, .confetti span { animation: none; }
   /* .cell.dest は点滅アニメーションでしか枠を出していないため、上の animation: none だけでは
-     行き先マスの印が完全に消えてしまう。動きを止めても印は残るよう、静止した枠を出す。 */
+     行き先マスの印が完全に消えてしまう。動きを止めても印は残るよう、静止した枠を出す。
+     .cell.dest.line-on もこの静的な枠にフォールバックする(box-shadow が none にならなければよい)。 */
   .cell.dest { box-shadow: inset 0 0 0 4px var(--accent); }
   .pl { transition: none; }
 }
