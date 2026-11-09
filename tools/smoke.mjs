@@ -364,6 +364,37 @@ async function scenarios() {
   })()`);
   check(fireworks.during && !fireworks.after, `花火が出ないか、消えません: ${JSON.stringify(fireworks)}`);
 
+  // 13b. 「近い石から順に返る」を、置いたマスからの距離が異なる2枚の石で確かめる(シナリオ13は距離が同じ2枚しか
+  // 見ていない)。6/1 と 6/20 で盤面の3行目を .WWB....(idx25,26が白、27が黒)にして黒が idx24 に打つと、
+  // 25(1マス先)と26(2マス先)を返す。25の animationDelay が26より小さいはず。
+  const nearFarDelays = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'れつ', birthday: { m: 6, d: 1 } }, { name: 'えらび', birthday: { m: 6, d: 20 } }],
+      dates.dayNum(2026, 6, 10),
+    );
+    let st = rules.newGame(match);
+    st = { ...st, board: st.board.slice() };
+    st.board[25] = { color: 'W', flips: 0, fixed: false };
+    st.board[26] = { color: 'W', flips: 0, fixed: false };
+    st.board[27] = { color: 'B', flips: 0, fixed: false };
+    st.turn = 'B';
+    const next = rules.playMove(st, 24);
+    const done = ui.animateMove(next);
+    const delays = {
+      near: document.querySelector('#board .cell[data-idx="25"] .stone')?.style.animationDelay,
+      far: document.querySelector('#board .cell[data-idx="26"] .stone')?.style.animationDelay,
+    };
+    await done;
+    return delays;
+  })()`);
+  check(
+    Number.parseInt(nearFarDelays.near) < Number.parseInt(nearFarDelays.far),
+    `近い石(idx25)の返る遅延が遠い石(idx26)以上です: ${JSON.stringify(nearFarDelays)}`,
+  );
+
   // 14. 日付演出(月またぎ+跳ね返り)の合計がおよそ1.5秒におさまる(石を返す演出は含まない animateDate 単体ではなく、
   // 実際に main.js が呼ぶ animateMove 全体で測る。間 50日・25マスの対戦で、黒が5枚(各重さ3=重さの合計15)を
   // 一気に返して11月3日→10月24日まで動き、10/14(黒の誕生日)の手前で跳ね返りつつ11月→10月の月またぎも起きる)
