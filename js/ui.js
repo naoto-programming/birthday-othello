@@ -15,6 +15,13 @@ const CHOICE_PROMPT = {
   steal: '自分の色にする相手の石を選んでください',
   plant: '石を置く空きマスを選んでください',
 };
+// 選ぶ効果の予告パネルに出す、選んだマスへの説明文
+const CHOICE_CONFIRM_TEXT = {
+  remove: 'この石を取り除く',
+  fix: 'この石を固定する',
+  steal: 'この石を自分の色にする',
+  plant: 'ここに石を置く',
+};
 
 export const playerOf = (state, color) => (color === 'B' ? state.match.black : state.match.white);
 // マス u の日付(通し番号)
@@ -85,15 +92,16 @@ export function renderSetupPreview(match) {
 
 // ---- 対戦画面 ----
 
-// shownP: 表示する日付のマス(演出中に途中の日付を出すため)、preview: 予告中の手(previewMove の戻り値)
-export function renderGame(state, { shownP = state.p, preview = null } = {}) {
+// shownP: 表示する日付のマス(演出中に途中の日付を出すため)、preview: 予告中の手(previewMove の戻り値)、
+// choicePick: 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス
+export function renderGame(state, { shownP = state.p, preview = null, choicePick = null } = {}) {
   $('#today-date').textContent = formatLong(dateOf(state, shownP));
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
   renderPlayerStatus($('#status-black'), state, 'B', shownP);
   renderPlayerStatus($('#status-white'), state, 'W', shownP);
-  $('#turn-msg').textContent = turnMessage(state, preview);
-  renderBoard(state, shownP, preview);
-  renderPreviewPanel(state, preview);
+  $('#turn-msg').textContent = turnMessage(state, preview, choicePick);
+  renderBoard(state, shownP, preview, choicePick);
+  renderPreviewPanel(state, preview, choicePick);
 }
 
 function renderPlayerStatus(el, state, color, shownP) {
@@ -114,16 +122,18 @@ function renderPlayerStatus(el, state, color, shownP) {
   if (effects.length) el.append(span('pl-effects', `次の手: ${effects.join('・')}`));
 }
 
-function turnMessage(state, preview) {
+function turnMessage(state, preview, choicePick) {
   if (state.phase === 'over') return '対戦終了';
   const player = playerOf(state, state.turn);
   const who = `${player.name}(${COLOR_NAME[state.turn]})`;
-  if (state.phase === 'choose') return `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
+  if (state.phase === 'choose') {
+    return choicePick !== null ? `${who}: 確かめて「決定」` : `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
+  }
   if (preview) return `${who}: 予告を確かめて「ここに置く」`;
   return `${who}の番です`;
 }
 
-function renderBoard(state, shownP, preview) {
+function renderBoard(state, shownP, preview, choicePick) {
   const { match } = state;
   const today = dateOf(state, shownP);
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
@@ -154,6 +164,7 @@ function renderBoard(state, shownP, preview) {
     const ev = eventByDay.get(day);
     if (ev) cell.classList.add(ev.used ? 'event-used' : 'event');
     if (targets.has(idx)) cell.classList.add('target');
+    if (idx === choicePick) cell.classList.add('chosen');
     // 日付が動かない予告(destDay === today)では、今日のマス自身を目的地として指し示す意味がないので dest を付けない。
     // こうしないと is-today と dest が同じマスに重なり、金色の「今日」強調がピンクの dest 点滅に上書きされてしまう。
     if (day === destDay && destDay !== today) cell.classList.add('dest');
@@ -178,8 +189,16 @@ function renderBoard(state, shownP, preview) {
   $('#board').replaceChildren(...cells);
 }
 
-function renderPreviewPanel(state, preview) {
+function renderPreviewPanel(state, preview, choicePick) {
   const panel = $('#preview-panel');
+  if (state.phase === 'choose' && choicePick !== null) {
+    const actions = document.createElement('div');
+    actions.className = 'pv-actions';
+    actions.append(button('決定', 'primary', { pv: 'confirm' }), button('選び直す', 'link', { pv: 'cancel' }));
+    panel.replaceChildren(span('pv-main', CHOICE_CONFIRM_TEXT[state.choice.effect]), actions);
+    panel.hidden = false;
+    return;
+  }
   if (!preview) {
     panel.hidden = true;
     panel.replaceChildren();

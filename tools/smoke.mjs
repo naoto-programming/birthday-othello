@@ -486,6 +486,43 @@ async function scenarios() {
   await shot('reduced-today-line-dest');
   await send('Emulation.setEmulatedMedia', { features: [] });
 
+  // 17. 石を選ぶ効果(鬼は外・固定・奪う・植える)も「予告 → 決定」にする。
+  // 2/1 と 2/7(1マス=1日、開始 2/4 = マス3、2/3 節分 = マス2)。
+  // 27(黒)・28(白)・45(黒)・46(白)・29(黒)と打つと、黒の29が28を返して2/3に止まり、節分「鬼は外」が黒に発動する(白は46だけ残る)。
+  await open(390, 844);
+  await fillSetup({ name: 'おに', m: 2, d: 1 }, { name: 'そと', m: 2, d: 7 });
+  await startFromSetup();
+  await playCell(27);
+  await playCell(28);
+  await playCell(45);
+  await playCell(46);
+  await playCell(29);
+  check(await js(`document.querySelector('#event-dialog').open`), '節分の「鬼は外」イベントが発動しません');
+  await js(`document.querySelector('#event-dialog button').click()`);
+  await settled();
+  check(await js(`document.querySelector('#board .cell[data-idx="46"] .stone') !== null`), '鬼は外の対象を選ぶ前に石が消えています');
+  check(await js(`document.querySelectorAll('#board .cell.target').length`) === 1, '鬼は外の候補(白の46だけ)が1つになっていません');
+  // 46 を1回タップ: まだ確定しない。選択中として強く強調し、予告パネルに説明と「決定」「選び直す」を出す。
+  await tapCell(46);
+  check(await js(`document.querySelector('#board .cell[data-idx="46"] .stone') !== null`), '1回タップしただけで石が取り除かれています');
+  check(!(await js(`document.querySelector('#preview-panel').hidden`)), '鬼は外の予告パネルが出ていません');
+  check(await panelText().then((t) => t.includes('取り除く')), `鬼は外の予告文に「取り除く」が含まれていません: ${await panelText()}`);
+  check(await js(`document.querySelector('#board .cell[data-idx="46"]').classList.contains('chosen')`), '選択中のマスが強調(chosen)されていません');
+  await shot('phone-choice-pick');
+  // 「選び直す」: パネルが閉じて候補の強調(target)だけに戻る。石は消えない。
+  await js(`document.querySelector('#preview-panel [data-pv="cancel"]').click()`);
+  check(await js(`document.querySelector('#preview-panel').hidden`), '「選び直す」で予告パネルが閉じません');
+  check(await js(`document.querySelector('#board .cell[data-idx="46"]').classList.contains('chosen')`) === false, '「選び直す」の後も選択中の強調が残っています');
+  check(await js(`document.querySelector('#board .cell[data-idx="46"]').classList.contains('target')`), '「選び直す」の後、候補の強調まで消えています');
+  check(await js(`document.querySelector('#board .cell[data-idx="46"] .stone') !== null`), '「選び直す」で石が消えています');
+  // 46 をもう1回選んで、2回目のタップで確定する
+  await tapCell(46);
+  await tapCell(46);
+  await settled();
+  check(await js(`document.querySelector('#board .cell[data-idx="46"] .stone') === null`), '2回目のタップで46の石が消えていません');
+  check(await js(`document.querySelector('#preview-panel').hidden`), '確定後も予告パネルが残っています');
+  check(await js(`document.querySelector('#status-white').classList.contains('active')`), '鬼は外の確定後、白の番になっていません');
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
@@ -613,7 +650,9 @@ async function playToEnd() {
     if (await js(`document.querySelector('#event-dialog').open`)) {
       await js(`document.querySelector('#event-dialog button').click()`);
     } else if (await js(`document.querySelector('#board .cell.target') !== null`)) {
-      await js(`document.querySelector('#board .cell.target').click()`);
+      const idx = await js(`document.querySelector('#board .cell.target').dataset.idx`);
+      await tapCell(Number(idx));
+      await tapCell(Number(idx));
     } else {
       const idx = await js(`document.querySelector('#board .cell:not(.has-stone)')?.dataset.idx ?? null`);
       if (idx === null) {

@@ -1,5 +1,5 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, newGame, playMove, previewMove } from './rules.js';
+import { applyChoice, choiceTargets, newGame, playMove, previewMove } from './rules.js';
 import {
   animateChoice, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
   highlightEffect, renderGame, renderSetupPreview, revealPreviewPanel, showEventDialog, showResult, showRules,
@@ -17,6 +17,8 @@ let busy = false;
 let epoch = 0;
 // 予告中の手(まだ打っていない): { idx, lines, adjust }
 let pick = null;
+// 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス
+let choicePick = null;
 
 function today() {
   const now = new Date();
@@ -66,6 +68,7 @@ function startGame() {
   if (match.error) return;
   epoch += 1;
   pick = null;
+  choicePick = null;
   state = newGame(match);
   setupScreen.hidden = true;
   gameScreen.hidden = false;
@@ -75,6 +78,7 @@ function startGame() {
 function backToSetup() {
   epoch += 1;
   pick = null;
+  choicePick = null;
   state = null;
   gameScreen.hidden = true;
   setupScreen.hidden = false;
@@ -95,6 +99,11 @@ async function run(task) {
 // 予告中の手を描き直す
 function showPick() {
   renderGame(state, { preview: pick ? previewMove(state, pick.idx, pick) : null });
+}
+
+// 選ぶ効果で、選択中のマスを描き直す
+function showChoicePick() {
+  renderGame(state, { choicePick });
 }
 
 // finished: 終局した対戦の状態をその場で受け取る(グローバルな state を読み直さない)。
@@ -135,6 +144,14 @@ async function confirmPick() {
   if (isCurrent() && local.phase === 'over') await finishGame(local, isCurrent);
 }
 
+// 選択中のマスを確定して、選ぶ効果(鬼は外・固定・奪う・植える)を適用する
+async function confirmChoice() {
+  if (choicePick === null || busy || !state || state.phase !== 'choose') return;
+  const idx = choicePick;
+  choicePick = null;
+  await choose(idx);
+}
+
 // 選ぶ効果(鬼は外・固定・奪う・植える)の対象を決める
 async function choose(idx) {
   const prev = state;
@@ -151,7 +168,14 @@ async function choose(idx) {
 
 async function tapCell(idx) {
   if (state.phase === 'choose') {
-    await choose(idx);
+    if (!choiceTargets(state).includes(idx)) return;
+    if (choicePick === idx) {
+      await confirmChoice();
+      return;
+    }
+    choicePick = idx;
+    showChoicePick();
+    revealPreviewPanel();
     return;
   }
   if (state.phase !== 'play') return;
@@ -195,7 +219,17 @@ boardEl.addEventListener('click', async (e) => {
 panelEl.addEventListener('click', async (e) => {
   try {
     const target = e.target.closest('button');
-    if (!target || busy || !state || !pick) return;
+    if (!target || busy || !state) return;
+    if (state.phase === 'choose') {
+      if (choicePick === null) return;
+      if (target.dataset.pv === 'confirm') await confirmChoice();
+      else if (target.dataset.pv === 'cancel') {
+        choicePick = null;
+        renderGame(state);
+      }
+      return;
+    }
+    if (!pick) return;
     if (target.dataset.pv === 'confirm') {
       await confirmPick();
     } else if (target.dataset.pv === 'cancel') {
