@@ -2,23 +2,21 @@ import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate }
 import { applyChoice, choiceTargets, newGame, playMove, previewMove } from './rules.js';
 import {
   animateChoice, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
-  highlightEffect, renderGame, renderSetupPreview, revealPreviewPanel, showEventDialog, showResult, showRules,
+  highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showResult, showRules,
 } from './ui.js';
 
 const form = document.querySelector('#setup-form');
 const setupScreen = document.querySelector('#setup');
 const gameScreen = document.querySelector('#game');
 const boardEl = document.querySelector('#board');
-const panelEl = document.querySelector('#preview-panel');
+const panelEl = document.querySelector('#adjust-panel');
 
 let state = null;
 let busy = false;
 // 対戦が入れ替わるたびに増やす番号。進行中の await の続きが、もう終わった対戦に書き戻さないようにする。
 let epoch = 0;
-// 予告中の手(まだ打っていない): { idx, lines, adjust }
-let pick = null;
-// 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス
-let choicePick = null;
+// 日数調整を選んでいる空きマス(まだ打っていない)
+let pickIdx = null;
 
 function today() {
   const now = new Date();
@@ -67,8 +65,7 @@ function startGame() {
   const match = setupMatch(readPlayers(), parseISODate(form.start.value));
   if (match.error) return;
   epoch += 1;
-  pick = null;
-  choicePick = null;
+  pickIdx = null;
   state = newGame(match);
   setupScreen.hidden = true;
   gameScreen.hidden = false;
@@ -77,8 +74,7 @@ function startGame() {
 
 function backToSetup() {
   epoch += 1;
-  pick = null;
-  choicePick = null;
+  pickIdx = null;
   state = null;
   gameScreen.hidden = true;
   setupScreen.hidden = false;
@@ -96,16 +92,6 @@ async function run(task) {
   }
 }
 
-// 予告中の手を描き直す
-function showPick() {
-  renderGame(state, { preview: pick ? previewMove(state, pick.idx, pick) : null });
-}
-
-// 選ぶ効果で、選択中のマスを描き直す
-function showChoicePick() {
-  renderGame(state, { choicePick });
-}
-
 // finished: 終局した対戦の状態をその場で受け取る(グローバルな state を読み直さない)。
 // isCurrent: 呼び出し側から引き継いだ、対戦がまだ有効かどうかの判定。
 // celebrate() の花火が流れている間や結果ダイアログが開いている間に「設定に戻る」で中断されたら、
@@ -119,16 +105,14 @@ async function finishGame(finished, isCurrent) {
   else backToSetup();
 }
 
-// 予告中の手を決定して打つ
-async function confirmPick() {
-  if (!pick || busy || !state || state.phase !== 'play') return;
-  const chosen = pick;
-  pick = null;
+// 手を打って演出する。adjust: 日数調整で選んだ −3〜+3(調整がなければ 0)
+async function place(idx, adjust) {
+  if (busy || !state || state.phase !== 'play') return;
   const myEpoch = epoch;
   const isCurrent = () => epoch === myEpoch;
   let local = state;
   await run(async () => {
-    const next = playMove(local, chosen.idx, { lines: chosen.lines, adjust: chosen.adjust });
+    const next = playMove(local, idx, { adjust });
     if (next === local) return;
     local = next;
     state = local;
@@ -142,14 +126,6 @@ async function confirmPick() {
     highlightEffect(local);
   });
   if (isCurrent() && local.phase === 'over') await finishGame(local, isCurrent);
-}
-
-// 選択中のマスを確定して、選ぶ効果(鬼は外・固定・奪う・植える)を適用する
-async function confirmChoice() {
-  if (choicePick === null || busy || !state || state.phase !== 'choose') return;
-  const idx = choicePick;
-  choicePick = null;
-  await choose(idx);
 }
 
 // 選ぶ効果(鬼は外・固定・奪う・植える)の対象を決める
@@ -167,42 +143,20 @@ async function choose(idx) {
 }
 
 async function tapCell(idx) {
+  // 選ぶ効果の対象外のマスは applyChoice が同じ state を返すので、choose の中で何も起きない
   if (state.phase === 'choose') {
-    if (!choiceTargets(state).includes(idx)) return;
-    if (choicePick === idx) {
-      await confirmChoice();
-      return;
-    }
-    choicePick = idx;
-    showChoicePick();
-    revealPreviewPanel();
+    await choose(idx);
     return;
   }
-  if (state.phase !== 'play') return;
-  if (!state.board[idx]) {
-    if (pick && pick.idx === idx) {
-      await confirmPick();
-      return;
-    }
-    pick = { idx, lines: undefined, adjust: 0 };
-    showPick();
-    revealPreviewPanel();
+  if (state.phase !== 'play' || state.board[idx]) return;
+  pickIdx = null;
+  if (previewMove(state, idx).needsAdjust) {
+    pickIdx = idx;
+    renderGame(state, { pickIdx });
+    revealAdjustPanel();
     return;
   }
-  // 予告中に列の石をタップすると、その列を返すかどうかを切り替える(最後の1列は外せない)
-  if (!pick) return;
-  const preview = previewMove(state, pick.idx, pick);
-  const line = preview.lines.find((l) => l.cells.includes(idx));
-  if (!line) return;
-  const chosen = new Set(preview.chosen);
-  if (chosen.has(line.dir)) {
-    if (chosen.size === 1) return;
-    chosen.delete(line.dir);
-  } else {
-    chosen.add(line.dir);
-  }
-  pick = { ...pick, lines: [...chosen] };
-  showPick();
+  await place(idx, 0);
 }
 
 boardEl.addEventListener('click', async (e) => {
@@ -219,25 +173,14 @@ boardEl.addEventListener('click', async (e) => {
 panelEl.addEventListener('click', async (e) => {
   try {
     const target = e.target.closest('button');
-    if (!target || busy || !state) return;
-    if (state.phase === 'choose') {
-      if (choicePick === null) return;
-      if (target.dataset.pv === 'confirm') await confirmChoice();
-      else if (target.dataset.pv === 'cancel') {
-        choicePick = null;
-        renderGame(state);
-      }
-      return;
-    }
-    if (!pick) return;
-    if (target.dataset.pv === 'confirm') {
-      await confirmPick();
-    } else if (target.dataset.pv === 'cancel') {
-      pick = null;
+    if (!target || busy || !state || pickIdx === null) return;
+    if (target.dataset.adjust !== undefined) {
+      const idx = pickIdx;
+      pickIdx = null;
+      await place(idx, Number(target.dataset.adjust));
+    } else if (target.dataset.cancel !== undefined) {
+      pickIdx = null;
       renderGame(state);
-    } else if (target.dataset.adjust !== undefined) {
-      pick = { ...pick, adjust: Number(target.dataset.adjust) };
-      showPick();
     }
   } catch (err) {
     console.error(err);

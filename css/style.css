@@ -115,31 +115,14 @@ button { font: inherit; cursor: pointer; }
   font-weight: bold;
   line-height: 1.3;
 }
-.cell.dest { animation: dest-blink 0.7s ease-in-out infinite alternate; }
 .cell.target { box-shadow: inset 0 0 0 3px var(--accent); animation: pulse 0.8s infinite alternate; }
-/* 選ぶ効果(鬼は外・固定・奪う・植える)で選択中(まだ確定していない)のマスは、ほかの候補より目立つよう
-   太い縁取りで止め、点滅をやめて「選ばれている」ことがひと目で分かるようにする。 */
-.cell.target.chosen { box-shadow: inset 0 0 0 5px var(--accent); animation: none; background: rgba(232, 106, 146, 0.12); }
 /* 今日のマスが選べる対象でもあるとき: 金色の縁取りと緩い点滅は常に残し、内側にピンクの選択リングを足す。
    3クラス分のセレクタ(詳細度0,3,0)にして、.cell.is-today / .cell.target の並び順に関係なく勝たせる。 */
 .cell.is-today.target {
   box-shadow: inset 0 0 0 4px var(--today), inset 0 0 0 7px var(--accent);
   animation: today-pulse 1.6s ease-in-out infinite;
 }
-/* 今日のマスが、予告中の列(返す/返さない)の通り道でもあるとき: .cell.line-on と同じ詳細度(0,2,0)で
-   source順が勝ってしまい金色の枠が消えるため、.cell.is-today.target と同様に組み合わせ専用のルールで勝たせる。
-   .cell.dest は renderBoard 側で today のマスには付けないので(destDay !== today の条件)、is-today との
-   組み合わせはそもそも起きない。 */
-.cell.is-today.line-on {
-  box-shadow: inset 0 0 0 4px var(--today), inset 0 0 0 6px var(--accent);
-  animation: today-pulse 1.6s ease-in-out infinite;
-}
-.cell.line-on { box-shadow: inset 0 0 0 2px var(--accent); }
-/* 行き先(dest)の点滅が、予告中の列(line-on)の静的な2pxの枠を box-shadow ごと占有して消してしまうため、
-   同じマスに重なったときだけ専用の keyframes にする。2px(列の枠)〜5px(行き先の点滅)の間で点滅させ、
-   列の枠の太さを下限として保ったまま、行き先の点滅も重ねて見せる。 */
-.cell.dest.line-on { animation: dest-line-blink 0.7s ease-in-out infinite alternate; }
-.cell.line-off::before { content: ""; position: absolute; inset: 3px; border: 2px dashed var(--muted); border-radius: 4px; pointer-events: none; }
+.cell.picked::before { content: ""; position: absolute; inset: 2px; border: 3px solid var(--accent); border-radius: 4px; pointer-events: none; }
 .cell.last .stone { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stone {
   width: 66%;
@@ -154,9 +137,6 @@ button { font: inherit; cursor: pointer; }
 .stone.black { background: var(--stone-black); color: #fff; }
 .stone.white { background: var(--stone-white); color: var(--ink); border: 1px solid #cfc6bd; }
 .stone.fixed { box-shadow: 0 0 0 3px #ffd166, 0 2px 2px rgba(0, 0, 0, 0.25); }
-.stone.ghost { opacity: 0.45; animation: ghost-pulse 1s ease-in-out infinite alternate; }
-.stone.will-flip { box-shadow: 0 0 0 3px var(--accent), 0 2px 2px rgba(0, 0, 0, 0.25); }
-.cell.line-on .stone.will-flip { animation: line-glow 1.2s ease-in-out infinite; }
 .stone.placed { animation: drop 0.45s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
 @keyframes drop {
   0% { transform: translateY(-160%) scale(1.15); opacity: 0; }
@@ -202,18 +182,12 @@ dialog[open] { animation: pop-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
 @keyframes flicker { from { transform: scaleY(0.85) rotate(-4deg); } to { transform: scaleY(1.15) rotate(4deg); } }
 @keyframes pulse { from { box-shadow: inset 0 0 0 2px var(--accent); } to { box-shadow: inset 0 0 0 4px var(--accent); } }
 @keyframes today-pulse { 50% { box-shadow: inset 0 0 0 4px var(--today), inset 0 0 14px 4px rgba(255, 183, 3, 0.55); } }
-@keyframes dest-blink { from { box-shadow: inset 0 0 0 0 var(--accent); } to { box-shadow: inset 0 0 0 4px var(--accent); } }
-@keyframes dest-line-blink { from { box-shadow: inset 0 0 0 2px var(--accent); } to { box-shadow: inset 0 0 0 5px var(--accent); } }
-@keyframes ghost-pulse { from { transform: scale(0.9); } to { transform: scale(1); } }
-@keyframes line-glow { 50% { box-shadow: 0 0 0 3px var(--accent), 0 0 10px 3px rgba(232, 106, 146, 0.6); } }
 
-.preview-panel { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; text-align: center; }
-.pv-main { font-weight: bold; font-size: 1.05rem; }
-.pv-note { font-size: 0.85rem; color: var(--muted); }
-.pv-actions { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 4px; }
+.adjust-panel { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; text-align: center; }
+.ap-main { font-weight: bold; font-size: 1.05rem; }
+.ap-note { font-size: 0.85rem; color: var(--muted); }
 .adjust-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .adjust-row button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; }
-.adjust-row button.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
 .game-footer { display: flex; justify-content: space-between; margin-top: 8px; }
 
 /* ダイアログ */
@@ -232,13 +206,9 @@ dialog::backdrop { background: rgba(58, 46, 42, 0.45); }
 @keyframes fall { to { transform: translateY(110vh) rotate(540deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .stone.placed, .stone.ghost, .stone.flip-to-black, .stone.flip-to-white, .stone.vanish, .stone.glow-gold,
-  .cell.target, .cell.is-today, .cell.dest, .cell.is-today.target, .cell.is-today.line-on, .cell.dest.line-on,
-  .cell.bounce, .cell.line-on .stone.will-flip,
+  .stone.placed, .stone.flip-to-black, .stone.flip-to-white, .stone.vanish, .stone.glow-gold,
+  .cell.target, .cell.is-today, .cell.is-today.target,
+  .cell.bounce,
   .board.page-turn, .pl.glow, dialog[open], .cake .flame, .confetti span { animation: none; }
-  /* .cell.dest は点滅アニメーションでしか枠を出していないため、上の animation: none だけでは
-     行き先マスの印が完全に消えてしまう。動きを止めても印は残るよう、静止した枠を出す。
-     .cell.dest.line-on もこの静的な枠にフォールバックする(box-shadow が none にならなければよい)。 */
-  .cell.dest { box-shadow: inset 0 0 0 4px var(--accent); }
   .pl { transition: none; }
 }

@@ -1,5 +1,5 @@
 import { boardDates, formatMD, fromDayNum, squareOffset, squarePeriod } from './dates.js';
-import { choiceTargets, countStones, reflect, stoneWeight } from './rules.js';
+import { choiceTargets, countStones, previewMove, reflect, stoneWeight } from './rules.js';
 import { EFFECTS, EVENTS, ruleLabel } from './events.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,13 +14,6 @@ const CHOICE_PROMPT = {
   fix: '固定する自分の石を選んでください',
   steal: '自分の色にする相手の石を選んでください',
   plant: '石を置く空きマスを選んでください',
-};
-// 選ぶ効果の予告パネルに出す、選んだマスへの説明文
-const CHOICE_CONFIRM_TEXT = {
-  remove: 'この石を取り除く',
-  fix: 'この石を固定する',
-  steal: 'この石を自分の色にする',
-  plant: 'ここに石を置く',
 };
 
 export const playerOf = (state, color) => (color === 'B' ? state.match.black : state.match.white);
@@ -92,24 +85,25 @@ export function renderSetupPreview(match) {
 
 // ---- 対戦画面 ----
 
-// shownP: 表示する日付のマス(演出中に途中の日付を出すため)、preview: 予告中の手(previewMove の戻り値)、
-// choicePick: 選ぶ効果(鬼は外・固定・奪う・植える)で、選択中(まだ確定していない)のマス、
-// turnOverride: 手番の表示・名札の光りに使う色(石が裏返る演出の間、打った人のままにするため)、
-// beforeFlip: この演出の間だけ、裏返る前の重さ(新しい重さ−1)で見せる石のマス
+// shownP: 表示する日付のマス(演出中に途中の日付を出すため)、
+// pickIdx: 日数調整を選んでいる空きマス(picked を付け、調整パネルを出す)、
+// turnOverride: 手番の表示・名札の光りに使う色(石が裏返る演出の間、打った人のままにするため。
+//   null でないときは演出中として扱い、終局した対戦でも「対戦終了」を出さない)、
+// shownWeights: Map(idx → 表示する重さ)。指定のある石はその数字で描く(裏返る前の重さを見せるため)
 export function renderGame(state, {
-  shownP = state.p, preview = null, choicePick = null, turnOverride = null, beforeFlip = null,
+  shownP = state.p, pickIdx = null, turnOverride = null, shownWeights = null,
 } = {}) {
   const turn = turnOverride ?? state.turn;
   $('#today-date').textContent = formatLong(dateOf(state, shownP));
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
-  renderPlayerStatus($('#status-black'), state, 'B', shownP, turn);
-  renderPlayerStatus($('#status-white'), state, 'W', shownP, turn);
-  $('#turn-msg').textContent = turnMessage(state, preview, choicePick, turn);
-  renderBoard(state, shownP, preview, choicePick, beforeFlip);
-  renderPreviewPanel(state, preview, choicePick);
+  renderPlayerStatus($('#status-black'), state, 'B', shownP, turn, turnOverride !== null);
+  renderPlayerStatus($('#status-white'), state, 'W', shownP, turn, turnOverride !== null);
+  $('#turn-msg').textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
+  renderBoard(state, shownP, pickIdx, shownWeights);
+  renderAdjustPanel(state, pickIdx);
 }
 
-function renderPlayerStatus(el, state, color, shownP, turn) {
+function renderPlayerStatus(el, state, color, shownP, turn, animating) {
   const { match } = state;
   const player = playerOf(state, color);
   const squares = color === 'B' ? shownP : match.N - shownP;
@@ -118,7 +112,7 @@ function renderPlayerStatus(el, state, color, shownP, turn) {
   const effects = Object.entries(state.pending[color])
     .filter(([, on]) => on)
     .map(([id]) => EFFECTS[id].name);
-  el.classList.toggle('active', state.phase !== 'over' && turn === color);
+  el.classList.toggle('active', (animating || state.phase !== 'over') && turn === color);
   el.replaceChildren(
     span('pl-name', `${COLOR_NAME[color]} ${player.name}`),
     span('pl-bday', `誕生日 ${formatMD(player.day)}`),
@@ -127,30 +121,21 @@ function renderPlayerStatus(el, state, color, shownP, turn) {
   if (effects.length) el.append(span('pl-effects', `次の手: ${effects.join('・')}`));
 }
 
-function turnMessage(state, preview, choicePick, turn) {
-  if (state.phase === 'over') return '対戦終了';
+function turnMessage(state, pickIdx, turn, animating) {
+  if (state.phase === 'over' && !animating) return '対戦終了';
   const player = playerOf(state, turn);
   const who = `${player.name}(${COLOR_NAME[turn]})`;
-  if (state.phase === 'choose') {
-    return choicePick !== null ? `${who}: 確かめて「決定」` : `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
-  }
-  if (preview) return `${who}: 予告を確かめて「ここに置く」`;
+  if (state.phase === 'choose') return `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
+  if (pickIdx !== null) return `${who}: 調整を選んでください`;
   return `${who}の番です`;
 }
 
-function renderBoard(state, shownP, preview, choicePick, beforeFlip) {
+function renderBoard(state, shownP, pickIdx, shownWeights) {
   const { match } = state;
   const today = dateOf(state, shownP);
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
   const eventByDay = new Map(Object.values(state.events).map((ev) => [ev.day, ev]));
   const targets = new Set(state.phase === 'choose' ? choiceTargets(state) : []);
-  const willFlip = new Set(preview?.flips ?? []);
-  const lineOf = new Map();
-  for (const line of preview?.lines ?? []) {
-    const on = preview.chosen.includes(line.dir);
-    for (const idx of line.cells) lineOf.set(idx, on);
-  }
-  const destDay = preview ? dateOf(state, preview.toP) : null;
   const cells = boardDates(today).map((day, idx) => {
     const cell = document.createElement('button');
     cell.type = 'button';
@@ -169,84 +154,53 @@ function renderBoard(state, shownP, preview, choicePick, beforeFlip) {
     const ev = eventByDay.get(day);
     if (ev) cell.classList.add(ev.used ? 'event-used' : 'event');
     if (targets.has(idx)) cell.classList.add('target');
-    if (idx === choicePick) cell.classList.add('chosen');
-    // 日付が動かない予告(destDay === today)では、今日のマス自身を目的地として指し示す意味がないので dest を付けない。
-    // こうしないと is-today と dest が同じマスに重なり、金色の「今日」強調がピンクの dest 点滅に上書きされてしまう。
-    if (day === destDay && destDay !== today) cell.classList.add('dest');
-    if (lineOf.has(idx)) cell.classList.add(lineOf.get(idx) ? 'line-on' : 'line-off');
+    if (idx === pickIdx) cell.classList.add('picked');
     const stone = state.board[idx];
     if (stone) {
       cell.classList.add('has-stone');
       const classes = ['stone', stone.color === 'B' ? 'black' : 'white'];
       if (stone.fixed) classes.push('fixed');
-      if (willFlip.has(idx)) classes.push('will-flip');
-      // 裏返る演出の間は、裏返り後の重さではなく裏返る前の重さ(新しい重さ−1)を見せる
-      const weight = beforeFlip?.includes(idx) ? stoneWeight(stone) - 1 : stoneWeight(stone);
-      const el = span(classes.join(' '), String(weight));
-      if (lineOf.get(idx)) el.style.animationDelay = `${cellDistance(idx, preview.idx) * 120}ms`;
-      cell.append(el);
-    } else if (preview && idx === preview.idx) {
-      cell.append(span(`stone ghost ${state.turn === 'B' ? 'black' : 'white'}`, '1'));
+      // 演出の間は、指定された重さ(裏返る前の重さ)で見せる
+      const weight = shownWeights?.get(idx) ?? stoneWeight(stone);
+      cell.append(span(classes.join(' '), String(weight)));
     }
-    // 予告中は直前手のマーカーを出さない。予告中の will-flip のピンクのリングと見分けがつかなくなるため。
-    if (!preview && state.lastMove?.idx === idx) cell.classList.add('last');
+    if (state.lastMove?.idx === idx) cell.classList.add('last');
     cell.setAttribute('aria-label', `${formatMD(day)} ${stone ? `${COLOR_NAME[stone.color]}の石` : '空き'}`);
     return cell;
   });
   $('#board').replaceChildren(...cells);
 }
 
-function renderPreviewPanel(state, preview, choicePick) {
-  const panel = $('#preview-panel');
-  if (state.phase === 'choose' && choicePick !== null) {
-    const actions = document.createElement('div');
-    actions.className = 'pv-actions';
-    actions.append(button('決定', 'primary', { pv: 'confirm' }), button('選び直す', 'link', { pv: 'cancel' }));
-    panel.replaceChildren(span('pv-main', CHOICE_CONFIRM_TEXT[state.choice.effect]), actions);
-    panel.hidden = false;
-    return;
-  }
-  if (!preview) {
+// 日数調整の選択パネル。pickIdx が null なら隠す
+function renderAdjustPanel(state, pickIdx) {
+  const panel = $('#adjust-panel');
+  if (pickIdx === null) {
     panel.hidden = true;
     panel.replaceChildren();
     return;
   }
-  const dest = formatLong(dateOf(state, preview.toP));
-  let main;
-  if (preview.stall) main = `返さない: 相手側へ1マス → ${dest}`;
-  else if (preview.flips.length === 0) main = '返さない: 挟める手がないので日付は動かない';
-  else if (preview.days === 0) {
-    // 日付が動かない0マスは、おやすみが理由のときと、調整で0マスを選んだときの両方で起こりうる。
-    const reason = state.pending[state.turn].rest ? 'おやすみ' : '調整で0マス';
-    main = `${preview.flips.length}枚返す: 日付は動かない(${reason})`;
-  } else main = `${preview.flips.length}枚返して${preview.days}マス動く → ${dest}`;
-  const notes = [];
-  if (preview.bounced) notes.push('誕生日を通り越して跳ね返ります');
-  if (preview.win) {
-    const winNote = `${playerOf(state, preview.win).name}の誕生日にぴったり!`;
-    notes.push(preview.win === state.turn ? winNote : `${winNote}(相手の勝ちになります)`);
-  } else if (preview.event) notes.push(`${preview.event.occasion}「${preview.event.name}」に止まります`);
-  if (preview.lines.length > 1) notes.push('列の石をタップすると、その列を返すかどうかを切り替えられます');
-  const children = [span('pv-main', main), ...notes.map((text) => span('pv-note', text))];
-  if (preview.needsAdjust) {
-    const row = document.createElement('div');
-    row.className = 'adjust-row';
-    for (let a = -3; a <= 3; a++) {
-      row.append(button(`${a > 0 ? '+' : ''}${a}`, a === preview.adjust ? 'selected' : '', { adjust: String(a) }));
-    }
-    children.push(span('pv-note', '調整: 動くマス数を −3〜+3 で選べます'), row);
+  const base = previewMove(state, pickIdx, { adjust: 0 });
+  const row = document.createElement('div');
+  row.className = 'adjust-row';
+  for (let a = -3; a <= 3; a++) {
+    const pv = previewMove(state, pickIdx, { adjust: a });
+    let win = '';
+    if (pv.win) win = pv.win === state.turn ? ' 勝ち' : ' 相手の勝ち';
+    const text = `${a > 0 ? '+' : ''}${a}(${pv.days}マス → ${formatMD(dateOf(state, pv.toP))}${win})`;
+    row.append(button(text, '', { adjust: String(a) }));
   }
-  const actions = document.createElement('div');
-  actions.className = 'pv-actions';
-  actions.append(button('ここに置く', 'primary', { pv: 'confirm' }), button('やめる', 'link', { pv: 'cancel' }));
-  children.push(actions);
-  panel.replaceChildren(...children);
+  panel.replaceChildren(
+    span('ap-main', '調整: 動くマス数を選ぶと置きます'),
+    span('ap-note', `${base.flips.length}枚返す(調整なしなら${base.days}マス)`),
+    row,
+    button('別のマスにする', 'link', { cancel: '1' }),
+  );
   panel.hidden = false;
 }
 
-// 予告パネルが画面の外にあれば、見える位置までスクロールする
-export function revealPreviewPanel() {
-  $('#preview-panel').scrollIntoView({ block: 'nearest' });
+// 調整パネルが画面の外にあれば、見える位置までスクロールする
+export function revealAdjustPanel() {
+  $('#adjust-panel').scrollIntoView({ block: 'nearest' });
 }
 
 // ---- ダイアログ ----
@@ -335,8 +289,12 @@ function launchConfetti(container) {
 export async function animateMove(state, { isCurrent = () => true } = {}) {
   const move = state.lastMove;
   // 石が落ちて裏返る間(日付が動く演出の間も)は、打った人の名札を光らせたまま、裏返る石は
-  // 裏返る前の重さで見せる。演出が終わったときの最後の描画(関数末尾)で、次の手番と新しい重さに切り替える。
-  const overlay = { turnOverride: move.color, beforeFlip: move.flips };
+  // 裏返る前の重さ(flipWeights)で見せる。重さリセットのイベントでも0にならない。
+  // 演出が終わったときの最後の描画(関数末尾)で、次の手番と新しい重さに切り替える。
+  const overlay = {
+    turnOverride: move.color,
+    shownWeights: new Map(move.flips.map((idx, i) => [idx, move.flipWeights[i]])),
+  };
   renderGame(state, { shownP: move.fromP, ...overlay });
   $(`#board .cell[data-idx="${move.idx}"] .stone`)?.classList.add('placed');
   const order = [...move.flips].sort((a, b) => cellDistance(a, move.idx) - cellDistance(b, move.idx));
@@ -366,7 +324,7 @@ const DATE_ANIM_BUDGET_MS = 1500;
 // めくらずに表示を切り替えるだけにする。
 const MAX_PAGE_TURNS = 2;
 
-async function animateDate(state, fromP, dir, days, { isCurrent, turnOverride = null, beforeFlip = null }) {
+async function animateDate(state, fromP, dir, days, { isCurrent, turnOverride = null, shownWeights = null }) {
   if (days <= 0) return;
   const { N } = state.match;
   const frames = Math.min(days, 30);
@@ -404,7 +362,7 @@ async function animateDate(state, fromP, dir, days, { isCurrent, turnOverride = 
         if (!isCurrent()) return;
       }
     }
-    renderGame(state, { shownP: p, turnOverride, beforeFlip });
+    renderGame(state, { shownP: p, turnOverride, shownWeights });
     bouncedSoFar ||= hit;
     if (bouncedSoFar) $('#turn-msg').textContent = '跳ね返り!';
     if (hit) {
