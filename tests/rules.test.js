@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { dayNum } from '../js/dates.js';
 import {
   reflect, stoneWeight, newGame, flipLines, computeFlips, canFlipAnywhere, previewMove, moveDays, playMove,
-  countStones, judgeFull, choiceTargets, applyChoice,
+  countStones, judgeFull, choiceTargets, applyChoice, sideOf, expandBoard, cropBoard,
 } from '../js/rules.js';
 
 const at = (r, c) => r * 8 + c;
+const at12 = (r, c) => r * 12 + c;
+const at14 = (r, c) => r * 14 + c;
 // 方向の番号: 0 左上, 1 上, 2 右上, 3 左, 4 右, 5 左下, 6 下, 7 右下
 const DIR = { UL: 0, U: 1, UR: 2, L: 3, R: 4, DL: 5, D: 6, DR: 7 };
 
@@ -34,9 +36,10 @@ function testMatch({ N = 20, u0 = 10, D = N, baseDay = dayNum(2026, 6, 1) } = {}
 }
 
 // テスト用の状態。rows を省略すると空の盤面。events は明示的に差し替える。
-function stateWith({ N = 20, p = 10, turn = 'B', rows = null, events = {} } = {}) {
+function stateWith({ N = 20, p = 10, turn = 'B', rows = null, events = {}, stage = 0 } = {}) {
   const state = newGame(testMatch({ N, u0: p }));
   if (rows) state.board = boardFrom(rows);
+  state.stage = stage;
   state.turn = turn;
   state.events = events;
   return state;
@@ -75,6 +78,40 @@ test('newGame: 空の盤面、黒の手番、開始マス', () => {
   assert.equal(state.turn, 'B');
   assert.equal(state.p, 10);
   assert.equal(state.phase, 'play');
+});
+
+test('newGame: 段階は0', () => {
+  assert.equal(newGame(testMatch()).stage, 0);
+});
+
+test('sideOf: 64・144・196 マスの盤面は 8・12・14', () => {
+  assert.equal(sideOf(Array(64).fill(null)), 8);
+  assert.equal(sideOf(Array(144).fill(null)), 12);
+  assert.equal(sideOf(Array(196).fill(null)), 14);
+});
+
+test('expandBoard: 石は (r+rings, c+rings) へ移り、色・重さ・固定はそのまま', () => {
+  const board = Array(64).fill(null);
+  board[at(0, 0)] = { color: 'W', flips: 2, fixed: true };
+  board[at(7, 7)] = { color: 'B', flips: 0, fixed: false };
+  const big = expandBoard(board, 2);
+  assert.equal(big.length, 144);
+  assert.deepEqual(big[at12(2, 2)], { color: 'W', flips: 2, fixed: true });
+  assert.deepEqual(big[at12(9, 9)], { color: 'B', flips: 0, fixed: false });
+  assert.equal(big.filter(Boolean).length, 2);
+  assert.deepEqual(board[at(0, 0)], { color: 'W', flips: 2, fixed: true }, '元の盤面は変えない');
+  assert.equal(board.length, 64);
+  const bigger = expandBoard(big, 1);
+  assert.equal(bigger.length, 196);
+  assert.deepEqual(bigger[at14(3, 3)], { color: 'W', flips: 2, fixed: true });
+});
+
+test('cropBoard: 広げた盤面の中央を切り抜くと元に戻る', () => {
+  const board = Array(64).fill(null);
+  board[at(0, 0)] = { color: 'W', flips: 2, fixed: true };
+  board[at(3, 4)] = { color: 'B', flips: 1, fixed: false };
+  assert.deepEqual(cropBoard(expandBoard(board, 2), 8), board);
+  assert.deepEqual(cropBoard(expandBoard(expandBoard(board, 2), 1), 8), board);
 });
 
 test('newGame: イベントを日付が属するマスに割り当てる(1マス=2日)', () => {
@@ -125,6 +162,16 @@ test('flipLines: 空の盤面や石があるマスでは列がない', () => {
   assert.deepEqual(flipLines(boardFrom(rowsWith('.WB.....')), at(3, 1), 'B'), []);
 });
 
+test('flipLines: 12マスの盤面では8マスより長い列を返せる', () => {
+  const rows12 = ['BWWWWWWWWWW.', ...Array(11).fill('.'.repeat(12))];
+  const board = boardFrom(rows12);
+  const lines = flipLines(board, at12(0, 11), 'B');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].cells.length, 10);
+  assert.equal(computeFlips(board, at12(0, 11), 'B').length, 10);
+  assert.equal(canFlipAnywhere(board, 'B'), true);
+});
+
 test('canFlipAnywhere: どこかに挟める手があるか', () => {
   assert.equal(canFlipAnywhere(boardFrom(EMPTY_ROWS), 'B'), false);
   // (3,0) 黒・(3,1) 白: 黒は (3,2) に置けば挟めるが、白は盤の端があるので挟めない
@@ -168,26 +215,15 @@ test('moveDays: 返さない手は、代償なら効果に関係なく相手側�
 
 // ---- 予告 ----
 
-test('previewMove: 既定ではすべての列を返す', () => {
+test('previewMove: 挟んだ列はすべて返す', () => {
   const pv = previewMove(stateWith({ N: 20, p: 10, rows: TWO_LINES }), at(3, 5));
-  assert.deepEqual(pv.chosen, [DIR.L, DIR.D]);
   assert.deepEqual(pv.flips, [at(3, 4), at(4, 5)]);
   assert.equal(pv.base, 2);
   assert.equal(pv.days, 2);
   assert.equal(pv.toP, 8);
   assert.equal(pv.stall, false);
-});
-
-test('previewMove: 選んだ列だけを返す', () => {
-  const pv = previewMove(stateWith({ rows: TWO_LINES }), at(3, 5), { lines: [DIR.D] });
-  assert.deepEqual(pv.chosen, [DIR.D]);
-  assert.deepEqual(pv.flips, [at(4, 5)]);
-  assert.equal(pv.toP, 9);
-});
-
-test('previewMove: 列を1つも選ばなければすべての列を返す(少なくとも1列)', () => {
-  const pv = previewMove(stateWith({ rows: TWO_LINES }), at(3, 5), { lines: [] });
-  assert.equal(pv.flips.length, 2);
+  assert.equal('chosen' in pv, false);
+  assert.equal('lines' in pv, false);
 });
 
 test('previewMove: 挟める手があるのに返さなければ相手側へ1マス', () => {
@@ -237,14 +273,14 @@ test('previewMove: おやすみが予定されているときは調整があっ�
 
 // ---- 打つ ----
 
-test('playMove: 予告と同じ結果になり、選ばなかった列は返らない', () => {
+test('playMove: 予告と同じ結果になり、挟んだ列はすべて返る', () => {
   const st = stateWith({ rows: TWO_LINES });
-  const pv = previewMove(st, at(3, 5), { lines: [DIR.D] });
-  const next = playMove(st, at(3, 5), { lines: [DIR.D] });
+  const pv = previewMove(st, at(3, 5));
+  const next = playMove(st, at(3, 5));
   assert.equal(next.p, pv.toP);
   assert.equal(next.board[at(4, 5)].color, 'B');
-  assert.equal(next.board[at(3, 4)].color, 'W');
-  assert.deepEqual(next.lastMove.lines, [DIR.D]);
+  assert.equal(next.board[at(3, 4)].color, 'B');
+  assert.equal(next.lastMove.lines, undefined);
   assert.equal(next.turn, 'W');
   assert.equal(st.board[at(4, 5)].color, 'W', '元の盤面は変えない');
 });
@@ -328,10 +364,17 @@ test('playMove: 跳ね返りで反対側の誕生日に止まったら、その�
   assert.deepEqual(next.result, { winner: 'W', reason: 'birthday' });
 });
 
-test('playMove: 最後の空きマスを埋めたら、残りマス数で判定する', () => {
+test('playMove: 段階0で最後の空きマスを埋めたら、周りに2周広がって段階1になる', () => {
   const next = playMove(stateWith({ N: 20, p: 8, rows: ['.BBBBBBB', ...Array(7).fill('BBBBBBBB')] }), at(0, 0));
-  assert.equal(next.phase, 'over');
-  assert.deepEqual(next.result, { winner: 'B', reason: 'full' });
+  assert.equal(next.phase, 'play');
+  assert.equal(next.stage, 1);
+  assert.equal(next.board.length, 144);
+  assert.equal(next.board[at12(2, 2)].color, 'B');
+  assert.equal(next.board[at12(0, 0)], null);
+  assert.equal(next.board[at12(11, 11)], null);
+  assert.equal(next.p, 8);
+  assert.equal(next.turn, 'W');
+  assert.equal(next.result, null);
 });
 
 test('judgeFull: 残りマス数が少ない方の勝ち', () => {
@@ -454,11 +497,113 @@ test('イベント: 選べる対象がなければ不発で、次の手番へ進
   assert.equal(next.turn, 'W');
 });
 
-test('イベント: 植えるで最後の空きマスが埋まったら判定で終局', () => {
+test('イベント: 植えるで最後の空きマスが埋まったら段階1に広がる', () => {
   const rows = ['.WBBBBB.', ...Array(7).fill('BBBBBBBB')];
   const mid = playMove(stateWith({ N: 20, p: 10, rows, events: { 9: ev('plant') } }), at(0, 0));
   assert.deepEqual(choiceTargets(mid), [at(0, 7)]);
   const next = applyChoice(mid, at(0, 7));
+  assert.equal(next.stage, 1);
+  assert.equal(next.phase, 'play');
+  assert.equal(next.board.length, 144);
+});
+
+// ---- 段階(サドンデス) ----
+
+const FULL_BUT_ONE = ['.WBBBBBB', ...Array(6).fill('BBBBBBBB'), 'BBBBBBBW'];
+
+test('段階1: 誕生日を通り越したら勝ちで、跳ね返らない', () => {
+  const next = playMove(stateWith({ stage: 1, N: 20, p: 3, rows: rowsWith('.WWWWWB.') }), at(3, 0));
+  assert.equal(next.lastMove.base, 5);
+  const pv = previewMove(stateWith({ stage: 1, N: 20, p: 3, rows: rowsWith('.WWWWWB.') }), at(3, 0));
+  assert.equal(pv.flips.length, 5);
+  assert.equal(pv.raw, -2);
+  assert.equal(pv.toP, 0);
+  assert.equal(pv.bounced, false);
+  assert.deepEqual(next.result, { winner: 'B', reason: 'pass', exact: false });
+  assert.equal(next.phase, 'over');
+});
+
+test('段階1: ぴったり届いても勝ち(exact)', () => {
+  const next = playMove(stateWith({ stage: 1, p: 2, rows: rowsWith('.WWB....') }), at(3, 0));
+  assert.deepEqual(next.result, { winner: 'B', reason: 'pass', exact: true });
+});
+
+test('段階1: 相手の手(様子見の代償)で通り越しても誕生日の人の勝ち', () => {
+  const next = playMove(stateWith({ stage: 1, p: 1, turn: 'W', rows: rowsWith('.BW.....') }), at(7, 7));
+  assert.equal(next.lastMove.stall, true);
+  assert.equal(next.result.winner, 'B');
+  assert.equal(next.result.reason, 'pass');
+});
+
+test('段階2: 移動は最後に2倍(+3 のあと)', () => {
+  const st = stateWith({ stage: 2, p: 10, rows: rowsWith('.WB.....') });
+  st.pending.B.plus3 = true;
+  const next = playMove(st, at(3, 0));
+  assert.equal(next.lastMove.days, 8);
+  assert.equal(next.p, 2);
+});
+
+test('段階2: 様子見の代償も2倍', () => {
+  const next = playMove(stateWith({ stage: 2, p: 10, rows: rowsWith('.WB.....') }), at(7, 7));
+  assert.equal(next.lastMove.stall, true);
+  assert.equal(next.lastMove.days, 2);
+  assert.equal(next.p, 12);
+});
+
+test('段階1: イベントは今までどおり止まったマスで発動する', () => {
+  const next = playMove(stateWith({ stage: 1, p: 10, rows: CENTER4, events: { 9: ev('plus3') } }), at(2, 3));
+  assert.equal(next.pending.B.plus3, true);
+});
+
+test('段階1で盤面が埋まったら1周広がって段階2になる', () => {
+  const rows = ['.BBBBBBBBBBB', ...Array(11).fill('B'.repeat(12))];
+  const next = playMove(stateWith({ stage: 1, p: 8, rows }), at12(0, 0));
+  assert.equal(next.stage, 2);
+  assert.equal(next.board.length, 196);
+  assert.equal(next.board[at14(1, 1)].color, 'B');
+  assert.equal(next.phase, 'play');
+});
+
+test('段階2で盤面が埋まったら判定で終局', () => {
+  const rows = ['.' + 'B'.repeat(13), ...Array(13).fill('B'.repeat(14))];
+  const next = playMove(stateWith({ stage: 2, N: 20, p: 8, rows }), at14(0, 0));
   assert.equal(next.phase, 'over');
   assert.deepEqual(next.result, { winner: 'B', reason: 'full' });
+});
+
+test('盤面を埋めた手がもう一手なら、広がったあとも同じ人の番', () => {
+  const next = playMove(stateWith({ p: 10, rows: FULL_BUT_ONE, events: { 9: ev('extraTurn') } }), at(0, 0));
+  assert.equal(next.stage, 1);
+  assert.equal(next.turn, 'B');
+});
+
+test('固定・奪うで、埋まった盤面のまま確定したら広がる', () => {
+  const mid = playMove(stateWith({ p: 10, rows: FULL_BUT_ONE, events: { 9: ev('steal') } }), at(0, 0));
+  assert.equal(mid.phase, 'choose');
+  assert.equal(mid.stage, 0);
+  const next = applyChoice(mid, at(7, 7));
+  assert.equal(next.stage, 1);
+  assert.equal(next.board.length, 144);
+  assert.equal(next.turn, 'W');
+});
+
+test('flipWeights: 打つ前の重さを記録する(重さリセットでも変わらない)', () => {
+  const make = (events) => {
+    const st = stateWith({ p: 10, rows: rowsWith('.WWB....'), events });
+    st.board[at(3, 1)].flips = 2;
+    return st;
+  };
+  const next = playMove(make({}), at(3, 0));
+  assert.deepEqual(next.lastMove.flips, [at(3, 1), at(3, 2)]);
+  assert.deepEqual(next.lastMove.flipWeights, [3, 1]);
+  assert.equal(next.p, 6);
+  const reset = playMove(make({ 6: ev('resetWeights') }), at(3, 0));
+  assert.ok(reset.board.filter(Boolean).every((stone) => stone.flips === 0));
+  assert.deepEqual(reset.lastMove.flipWeights, [3, 1]);
+});
+
+test('lastMove.stage は打ったときの段階', () => {
+  const next = playMove(stateWith({ p: 10, rows: FULL_BUT_ONE }), at(0, 0));
+  assert.equal(next.stage, 1);
+  assert.equal(next.lastMove.stage, 0);
 });
