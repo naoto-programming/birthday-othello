@@ -1,14 +1,16 @@
 // 本物のルール(js/rules.js)で、ていねいなAI同士を対戦させてバランスを確かめる。
 // 使い方: caffeinate -i npm run balance(対局数を変えるときは npm run balance -- 400)
 import { defaultStart, setupMatch } from '../js/dates.js';
-import { applyChoice, choiceTargets, flipLines, newGame, playMove, previewMove } from '../js/rules.js';
+import { applyChoice, choiceTargets, newGame, playMove, previewMove } from '../js/rules.js';
 
 const GAMES = Number(process.argv[2] ?? 200);
 if (!Number.isInteger(GAMES) || GAMES <= 0) {
   console.error(`NG: 対局数は正の整数で指定してください: ${process.argv[2]}`);
   process.exit(1);
 }
-const PASS_RANGE = [0.6, 0.9];
+const FULL_MAX = 0.1;
+const SAFETY_CHECKS = 30;
+const MAX_MOVES = 600;
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 function randomBirthday() {
@@ -16,22 +18,13 @@ function randomBirthday() {
   return { m: date.getUTCMonth() + 1, d: date.getUTCDate() };
 }
 
-function nonEmptySubsets(dirs) {
-  const out = [];
-  for (let mask = 1; mask < 1 << dirs.length; mask++) out.push(dirs.filter((_, i) => mask & (1 << i)));
-  return out;
-}
-
-// 置けるすべての手(返す列の選び方と調整の値まで含める)
+// 置けるすべての手(調整の効果があれば −3〜+3、なければ 0)
 function candidates(state) {
-  const adjusts = state.pending[state.turn].adjust ? [-3, -2, -1, 0, 1, 2, 3] : [0];
   const out = [];
-  for (let idx = 0; idx < 64; idx++) {
+  for (let idx = 0; idx < state.board.length; idx++) {
     if (state.board[idx]) continue;
-    const dirs = flipLines(state.board, idx, state.turn).map((line) => line.dir);
-    for (const lines of dirs.length ? nonEmptySubsets(dirs) : [[]]) {
-      for (const adjust of adjusts) out.push({ idx, lines, adjust });
-    }
+    const adjusts = previewMove(state, idx, { adjust: 0 }).needsAdjust ? [-3, -2, -1, 0, 1, 2, 3] : [0];
+    for (const adjust of adjusts) out.push({ idx, adjust });
   }
   return out;
 }
@@ -66,7 +59,7 @@ function carefulMove(state) {
     return { c, score };
   }).sort((a, b) => b.score - a.score);
   if (scored[0].score === Infinity) return scored[0].c;
-  for (const { c } of scored) {
+  for (const { c } of scored.slice(0, SAFETY_CHECKS)) {
     if (!opponentCanWin(resolveChoice(playMove(state, c.idx, c)), me)) return c;
   }
   return scored[0].c;
@@ -78,33 +71,42 @@ function playGame() {
   let state = newGame(setupMatch([a, b], defaultStart(a.birthday, b.birthday, 2026)));
   let moves = 0;
   let events = 0;
-  while (state.phase !== 'over' && moves < 300) {
+  while (state.phase !== 'over' && moves < MAX_MOVES) {
     const c = carefulMove(state);
     state = playMove(state, c.idx, c);
     if (state.lastMove.event) events += 1;
     state = resolveChoice(state);
     moves += 1;
   }
-  return { result: state.result, moves, events };
+  return { result: state.result, stage: state.stage, moves, events, unfinished: state.phase !== 'over' };
 }
 
 const started = Date.now();
-let birthday = 0;
+const count = { birthday: 0, stage1: 0, stage2: 0, full: 0, unfinished: 0 };
 let blackWins = 0;
 let totalMoves = 0;
 let totalEvents = 0;
 for (let i = 0; i < GAMES; i++) {
   const game = playGame();
-  if (game.result?.reason === 'birthday') birthday += 1;
+  const reason = game.result?.reason;
+  if (game.unfinished) count.unfinished += 1;
+  else if (reason === 'birthday') count.birthday += 1;
+  else if (reason === 'pass' && game.stage === 1) count.stage1 += 1;
+  else if (reason === 'pass' && game.stage === 2) count.stage2 += 1;
+  else if (reason === 'full') count.full += 1;
   if (game.result?.winner === 'B') blackWins += 1;
   totalMoves += game.moves;
   totalEvents += game.events;
 }
-const rate = birthday / GAMES;
+const pct = (n) => `${Math.round((100 * n) / GAMES)}%`;
 console.log(`対局数 ${GAMES}(${Math.round((Date.now() - started) / 1000)}秒)`);
-console.log(`誕生日で決着: ${Math.round(100 * rate)}%  平均手数: ${(totalMoves / GAMES).toFixed(1)}  先手の勝率: ${Math.round((100 * blackWins) / GAMES)}%  1試合のイベント: ${(totalEvents / GAMES).toFixed(1)}`);
-if (rate < PASS_RANGE[0] || rate > PASS_RANGE[1]) {
-  console.error(`NG: 誕生日決着の割合が ${PASS_RANGE[0] * 100}〜${PASS_RANGE[1] * 100}% の範囲外です`);
+console.log(`終わり方: 通常のぴったり ${pct(count.birthday)}  サドンデス ${pct(count.stage1)}  サドンデス×2 ${pct(count.stage2)}  最後の判定 ${pct(count.full)}  未決着 ${count.unfinished}`);
+console.log(`平均手数: ${(totalMoves / GAMES).toFixed(1)}  先手の勝率: ${pct(blackWins)}  1試合のイベント: ${(totalEvents / GAMES).toFixed(1)}`);
+const problems = [];
+if (count.unfinished > 0) problems.push(`未決着の対局が ${count.unfinished} 局あります`);
+if (count.full / GAMES > FULL_MAX) problems.push(`最後の判定の割合が ${FULL_MAX * 100}% を超えています`);
+if (problems.length) {
+  console.error(`NG: ${problems.join('、')}`);
   process.exit(1);
 }
 console.log('OK: バランスは想定の範囲内です');
