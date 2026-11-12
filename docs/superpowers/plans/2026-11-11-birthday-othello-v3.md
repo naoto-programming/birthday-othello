@@ -259,6 +259,35 @@ git commit -m "Tap to place immediately; adjust panel only when the adjust effec
 
 ---
 
+### Task 5: 盤面が広がるときに石の重さを1に戻す(追加、Task 4 より先に行う)
+
+2026-11-12 に追加。Task 2 のバランス確認で、広がった直後に打つ人が1手でほぼ必ず勝つことが分かった(400局で93%)。シミュレーションを見て、ユーザーが「広がるたびに重さを1に戻す」を選んだ(仕様 2.2 に追記済み)。実行順は 1 → 2 → 3 → 5 → 4。
+
+**Files:**
+- Modify: `js/rules.js`(`finishTurn` の拡張の分岐)
+- Test: `tests/rules.test.js`
+
+**Interfaces:**
+- Consumes: Task 1 の `finishTurn`・`expandBoard`(`expandBoard` は純粋なまま、flips を保つ。今のテストもそのまま)
+- Produces: 盤面が広がったあと(段階0 → 1、段階1 → 2 のどちらでも)、盤面のすべての石の `flips` が 0。色と `fixed` はそのまま。`lastMove.flipWeights` は広げる前(打つ前)の重さのまま
+
+- [ ] **Step 1: テストを足す**
+  - `盤面が広がるとき、石の重さはすべて1に戻る(色・固定はそのまま)`: `FULL_BUT_ONE` で `at(7, 7)` の白を `{ flips: 3, fixed: true }`、`at(3, 3)` の flips を 5、`at(0, 1)`(返される白)の flips を 2 にする。p 10 で `at(0, 0)` に黒 → `stage` 1、盤面のすべての石の flips が 0、`board[at12(9, 9)]` が白で `fixed` true、`board[at12(5, 5)]` が黒、`lastMove.flipWeights` が `[3]`。
+  - `段階1から2へ広がるときも重さは1に戻る`: 12行すべて 'B'(すべての石の flips を 2)で (0,0) だけ空き、stage 1 → (0,0) に黒 → `stage` 2、すべての石の flips が 0。
+- [ ] **Step 2: 失敗を確かめる**(`npm test` で上の2つが FAIL)
+- [ ] **Step 3: 実装する**(`finishTurn` で `expandBoard` のあと、すべての石の `flips` を 0 にする。コメントで理由を1行)
+- [ ] **Step 4: 通ることを確かめる**
+  - Run: `npm test` → すべて PASS。
+  - Run: `caffeinate -i npm run balance` → `OK`。出力の3行(対局数・終わり方・平均手数)を報告に書く。先手の勝率がおよそ 45〜55% になる見込み(コントローラーの事前シミュレーションでは 48%)。外れても直さずに数字を報告する。
+- [ ] **Step 5: コミット**
+
+```bash
+git add js/rules.js tests/rules.test.js
+git commit -m "Reset stone weights to 1 whenever the board expands"
+```
+
+---
+
 ### Task 4: 画面(サドンデス)
 
 **Files:**
@@ -276,8 +305,8 @@ git commit -m "Tap to place immediately; adjust panel only when the adjust effec
 画面の変更:
 - dates.js: `boardDates(currentDay, count = 64)`。dates.test.js に `boardDates: マスの数だけ並べる`(144 と 196 で長さと先頭・末尾の日)。
 - index.html: `.today` の段落の直後に `<p id="stage-badge" class="stage-badge" hidden></p>`。ルールの項目「盤面が埋まったら、誕生日までの残りマス数が少ない方の勝ち…」を次の3項目に置き換える。
-  - 「盤面が埋まったらサドンデス: 周りに2周マスが増えて12×12になり、日付が誕生日に届くか通り越したら、その誕生日の人の勝ちです(跳ね返りません)。」
-  - 「サドンデスでも埋まったら、さらに1周増えて14×14になり、日付の動きが2倍になります。」
+  - 「盤面が埋まったらサドンデス: 周りに2周マスが増えて12×12になり、石の重さはすべて1に戻ります。日付が誕生日に届くか通り越したら、その誕生日の人の勝ちです(跳ね返りません)。」
+  - 「サドンデスでも埋まったら、さらに1周増えて14×14になり、重さはまた1に戻って、日付の動きが2倍になります。」
   - 「それでも埋まったら、誕生日までの残りマス数が少ない方の勝ち。同じなら石の数で決めます。」
 
   あわせて「誕生日を通り越したら、通り越した分だけ跳ね返ります。」の末尾に「(サドンデスでは跳ね返りません)」を足す。
@@ -285,7 +314,7 @@ git commit -m "Tap to place immediately; adjust panel only when the adjust effec
   - `renderBoard`: `const size = sideOf(state.board)`。`#board` に `style.setProperty('--size', String(size))` と `dataset.size = String(size)`。日付は `boardDates(today, size * size)`。
   - `renderGame`: `#stage-badge` を、段階0なら隠す、1なら「サドンデス」、2なら「サドンデス ×2」。
   - `animateMove`: 石の順番は `cellDistance(a, move.idx, sideOf(state.board))`。日付の演出に渡す日数は `move.stage > 0 ? Math.abs(move.toP - move.fromP) : move.days`(段階1・2は端で止まるので、跳ね返りの経路を作らない)。
-  - `showStageDialog(state)`: 段階1は 名前の行「盤面が埋まった!」、見出し「サドンデス」、本文「マスが広がり、先に自分の誕生日を通り越した人の勝ち」。段階2は「盤面がまた埋まった!」「サドンデス ×2」「さらに広がり、日付の動きが2倍に」。
+  - `showStageDialog(state)`: 段階1は 名前の行「盤面が埋まった!」、見出し「サドンデス」、本文「マスが広がり、先に自分の誕生日を通り越した人の勝ち。石の重さはすべて1に戻ります」。段階2は「盤面がまた埋まった!」「サドンデス ×2」「さらに広がり、日付の動きが2倍に。石の重さはまた1に戻ります」。(Task 5 で、広がるときに重さが1に戻るようになっている。)
   - `animateExpand(state, fromSize, { isCurrent })`: `renderGame(state)`。新しい外周のマス(中央の fromSize×fromSize の外)に `.ring-new`、石に `.settle`。`#stage-badge` に `glowOnce(…, 'pulse')`。`await wait(600)`。
   - `resultReason`:
     - `'pass'`: `exact` なら「サドンデスで、日付が{m/d}({名前}の誕生日)に届きました。」、そうでなければ「…を通り越しました。」
@@ -308,7 +337,7 @@ git commit -m "Tap to place immediately; adjust panel only when the adjust effec
 スモークテスト(追加):
 - シナリオ20(本物の画面で段階1へ): 先に、決まった誕生日2つと開始日で、`playToEnd()` と同じ打ち方(最初の空きマス、選ぶ効果は最初の候補、調整は0)をしたときに、段階0では誕生日で決着せず段階1に進む組を、Node で `js/rules.js` を使って探す(探すスクリプトは scratchpad に置き、コミットしない)。同じ誕生日の組は黒白がランダムになるので使わない。開始日はシナリオ15と同じやり方で明示する。見つけた組をシナリオに書き、コメントに探し方を1行残す。
   - 動きを減らす設定にして、上の打ち方で `#event-dialog` に「サドンデス」が出るまで進める。
-  - 見出しが「サドンデス」、本文に「通り越した」。OK を押して `settled()` → `#board .cell` が144、`#board` の `data-size` が '12'、`#stage-badge` が見えていて「サドンデス」、石が64。
+  - 見出しが「サドンデス」、本文に「通り越した」と「1に戻ります」。OK を押して `settled()` → `#board .cell` が144、`#board` の `data-size` が '12'、`#stage-badge` が見えていて「サドンデス」、石が64。
   - 動きを元に戻してスクリーンショット `phone-sudden-death`。
   - 動きを減らす設定に戻し、`playToEnd()` で最後まで → 結果ダイアログが出る。
 - シナリオ21(14×14 の配置): 幅390と320で、ページ内で `rules.newGame` の盤面を `expandBoard` で 12 → 14 にした段階2の状態を作り、`ui.renderGame`。
