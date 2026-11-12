@@ -206,6 +206,11 @@ export function playMove(state, idx, { adjust } = {}) {
   return finishTurn(next, extraTurn);
 }
 
+// 広がった直後に打つ側が有利すぎるため、広げるたびに全部の石の重さを1(flips = 0)に戻す。色と固定はそのまま。
+function resetWeights(state) {
+  state.board = state.board.map((stone) => (stone ? { ...stone, flips: 0 } : stone));
+}
+
 // 盤面が埋まっていれば広げる(段階2なら判定で終局)。そのあと次の手番へ。石やマスを選ぶ途中なら何もしない。
 function finishTurn(state, extraTurn) {
   if (state.phase === 'choose') return state;
@@ -214,9 +219,11 @@ function finishTurn(state, extraTurn) {
     if (state.stage === 0) {
       state.board = expandBoard(state.board, 2);
       state.stage = 1;
+      resetWeights(state);
     } else if (state.stage === 1) {
       state.board = expandBoard(state.board, 1);
       state.stage = 2;
+      resetWeights(state);
     } else {
       state.phase = 'over';
       state.result = judgeFull(state);

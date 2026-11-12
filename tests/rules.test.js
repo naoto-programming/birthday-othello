@@ -607,3 +607,27 @@ test('lastMove.stage は打ったときの段階', () => {
   assert.equal(next.stage, 1);
   assert.equal(next.lastMove.stage, 0);
 });
+
+test('盤面が広がるとき、石の重さはすべて1に戻る(色・固定はそのまま)', () => {
+  const state = stateWith({ p: 10, rows: FULL_BUT_ONE });
+  state.board[at(7, 7)] = { color: 'W', flips: 3, fixed: true };
+  state.board[at(3, 3)].flips = 5;
+  state.board[at(0, 1)].flips = 2;
+  const next = playMove(state, at(0, 0));
+  assert.equal(next.stage, 1);
+  assert.ok(next.board.filter(Boolean).every((stone) => stone.flips === 0));
+  assert.equal(next.board[at12(9, 9)].color, 'W');
+  assert.equal(next.board[at12(9, 9)].fixed, true);
+  assert.equal(next.board[at12(5, 5)].color, 'B');
+  assert.deepEqual(next.lastMove.flipWeights, [3]);
+});
+
+test('段階1から2へ広がるときも重さは1に戻る', () => {
+  // (0,1) を白にして、(0,0) の黒が1枚返せるようにする
+  const rows = ['.W' + 'B'.repeat(10), ...Array(11).fill('B'.repeat(12))];
+  const state = stateWith({ stage: 1, p: 10, rows });
+  for (const stone of state.board) if (stone) stone.flips = 2;
+  const next = playMove(state, 0);
+  assert.equal(next.stage, 2);
+  assert.ok(next.board.filter(Boolean).every((stone) => stone.flips === 0));
+});
