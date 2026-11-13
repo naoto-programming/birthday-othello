@@ -1,8 +1,8 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, choiceTargets, newGame, playMove, previewMove } from './rules.js';
+import { applyChoice, choiceTargets, cropBoard, newGame, playMove, previewMove, sideOf } from './rules.js';
 import {
-  animateChoice, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
-  highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showResult, showRules,
+  animateChoice, animateExpand, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
+  highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showResult, showRules, showStageDialog,
 } from './ui.js';
 
 const form = document.querySelector('#setup-form');
@@ -105,6 +105,19 @@ async function finishGame(finished, isCurrent) {
   else backToSetup();
 }
 
+// 盤面が広がった手の演出は、広がる前の盤面(中央を切り抜いたもの)で行い、そのあとで広げる演出をする
+const viewBefore = (prev, next) => (
+  next.stage === prev.stage ? next : { ...next, stage: prev.stage, board: cropBoard(next.board, sideOf(prev.board)) }
+);
+
+// 段階が上がっていたら、サドンデスのポップアップと盤面が広がる演出を出す
+async function expandIfNeeded(prev, next, isCurrent) {
+  if (next.stage <= prev.stage || !isCurrent()) return;
+  await showStageDialog(next);
+  if (!isCurrent()) return;
+  await animateExpand(next, sideOf(prev.board), { isCurrent });
+}
+
 // 手を打って演出する。adjust: 日数調整で選んだ −3〜+3(調整がなければ 0)
 async function place(idx, adjust) {
   if (busy || !state || state.phase !== 'play') return;
@@ -112,18 +125,24 @@ async function place(idx, adjust) {
   const isCurrent = () => epoch === myEpoch;
   let local = state;
   await run(async () => {
-    const next = playMove(local, idx, { adjust });
-    if (next === local) return;
+    const prev = local;
+    const next = playMove(prev, idx, { adjust });
+    if (next === prev) return;
     local = next;
     state = local;
-    await animateMove(local, { isCurrent });
-    if (!isCurrent() || !local.lastMove.event) return;
-    await showEventDialog(local);
+    // 広がった手でも、演出は広がる前の盤面で行う
+    const view = viewBefore(prev, next);
+    await animateMove(view, { isCurrent });
     if (!isCurrent()) return;
-    if (local.lastMove.warpTo !== undefined) await animateWarp(local, { isCurrent });
-    if (!isCurrent()) return;
-    renderGame(local);
-    highlightEffect(local);
+    if (next.lastMove.event) {
+      await showEventDialog(view);
+      if (!isCurrent()) return;
+      if (next.lastMove.warpTo !== undefined) await animateWarp(view, { isCurrent });
+      if (!isCurrent()) return;
+      renderGame(view);
+      highlightEffect(view);
+    }
+    await expandIfNeeded(prev, next, isCurrent);
   });
   if (isCurrent() && local.phase === 'over') await finishGame(local, isCurrent);
 }
@@ -137,7 +156,8 @@ async function choose(idx) {
   const isCurrent = () => epoch === myEpoch;
   await run(async () => {
     state = next;
-    await animateChoice(prev, next, idx, { isCurrent });
+    await animateChoice(prev, viewBefore(prev, next), idx, { isCurrent });
+    await expandIfNeeded(prev, next, isCurrent);
   });
   if (isCurrent() && next.phase === 'over') await finishGame(next, isCurrent);
 }

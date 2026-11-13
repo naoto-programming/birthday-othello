@@ -1,5 +1,5 @@
 import { boardDates, formatMD, fromDayNum, squareOffset, squarePeriod } from './dates.js';
-import { choiceTargets, countStones, previewMove, reflect, stoneWeight } from './rules.js';
+import { choiceTargets, countStones, previewMove, reflect, sideOf, stoneWeight } from './rules.js';
 import { EFFECTS, EVENTS, ruleLabel } from './events.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,8 +19,10 @@ const CHOICE_PROMPT = {
 export const playerOf = (state, color) => (color === 'B' ? state.match.black : state.match.white);
 // マス u の日付(通し番号)
 export const dateOf = (state, u = state.p) => state.match.baseDay + squareOffset(u, state.match.D, state.match.N);
-// 2つのマスが盤面上で何マス離れているか(縦・横・斜め)
-export const cellDistance = (a, b) => Math.max(Math.abs(Math.floor(a / 8) - Math.floor(b / 8)), Math.abs((a % 8) - (b % 8)));
+// 2つのマスが盤面上で何マス離れているか(縦・横・斜め)。size は盤面の一辺(8・12・14)
+export const cellDistance = (a, b, size = 8) => (
+  Math.max(Math.abs(Math.floor(a / size) - Math.floor(b / size)), Math.abs((a % size) - (b % size)))
+);
 
 export function formatLong(day) {
   const { m, d } = fromDayNum(day);
@@ -99,8 +101,16 @@ export function renderGame(state, {
   renderPlayerStatus($('#status-black'), state, 'B', shownP, turn, turnOverride !== null);
   renderPlayerStatus($('#status-white'), state, 'W', shownP, turn, turnOverride !== null);
   $('#turn-msg').textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
+  renderStageBadge(state);
   renderBoard(state, shownP, pickIdx, shownWeights);
   renderAdjustPanel(state, pickIdx);
+}
+
+// サドンデスの札: 段階0なら隠す
+function renderStageBadge(state) {
+  const badge = $('#stage-badge');
+  badge.hidden = state.stage === 0;
+  badge.textContent = state.stage === 1 ? 'サドンデス' : state.stage === 2 ? 'サドンデス ×2' : '';
 }
 
 function renderPlayerStatus(el, state, color, shownP, turn, animating) {
@@ -132,11 +142,15 @@ function turnMessage(state, pickIdx, turn, animating) {
 
 function renderBoard(state, shownP, pickIdx, shownWeights) {
   const { match } = state;
+  const size = sideOf(state.board);
+  const board = $('#board');
+  board.style.setProperty('--size', String(size));
+  board.dataset.size = String(size);
   const today = dateOf(state, shownP);
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
   const eventByDay = new Map(Object.values(state.events).map((ev) => [ev.day, ev]));
   const targets = new Set(state.phase === 'choose' ? choiceTargets(state) : []);
-  const cells = boardDates(today).map((day, idx) => {
+  const cells = boardDates(today, size * size).map((day, idx) => {
     const cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'cell';
@@ -225,6 +239,17 @@ export function showEventDialog(state) {
   return openDialog($('#event-dialog'));
 }
 
+// 盤面が広がったときのポップアップ(段階1・2に入った直後)
+export function showStageDialog(state) {
+  const first = state.stage === 1;
+  $('#event-player').textContent = first ? '盤面が埋まった!' : '盤面がまた埋まった!';
+  $('#event-title').textContent = first ? 'サドンデス' : 'サドンデス ×2';
+  $('#event-text').textContent = first
+    ? 'マスが広がり、先に自分の誕生日を通り越した人の勝ち。石の重さはすべて1に戻ります'
+    : 'さらに広がり、日付の動きが2倍に。石の重さはまた1に戻ります';
+  return openDialog($('#event-dialog'));
+}
+
 export function showRules() {
   const dialog = $('#rules-dialog');
   const closed = openDialog(dialog);
@@ -260,14 +285,20 @@ function resultReason(state) {
     const winner = playerOf(state, result.winner);
     return `日付が${formatMD(winner.day)}(${winner.name}の誕生日)にぴったり止まりました。`;
   }
+  if (result.reason === 'pass') {
+    const winner = playerOf(state, result.winner);
+    const who = `${formatMD(winner.day)}(${winner.name}の誕生日)`;
+    return result.exact ? `サドンデスで、日付が${who}に届きました。` : `サドンデスで、日付が${who}を通り越しました。`;
+  }
   const unit = match.k > 1 ? 'マス' : '日';
+  const full = state.stage === 2 ? 'サドンデスでも盤面が埋まりました。' : '盤面が埋まりました。';
   const left = `誕生日まで ${match.black.name} あと${state.p}${unit}、${match.white.name} あと${match.N - state.p}${unit}`;
-  if (state.p !== match.N - state.p) return `盤面が埋まりました。${left}。`;
+  if (state.p !== match.N - state.p) return `${full}${left}。`;
   const stones = countStones(state);
   const count = `石の数は ${match.black.name} ${stones.B}個、${match.white.name} ${stones.W}個`;
   return result.winner
-    ? `盤面が埋まりました。${left}で同じなので、石の数で決めました(${count})。`
-    : `盤面が埋まりました。${left}で同じ、${count}で同じでした。`;
+    ? `${full}${left}で同じなので、石の数で決めました(${count})。`
+    : `${full}${left}で同じ、${count}で同じでした。`;
 }
 
 function launchConfetti(container) {
@@ -297,7 +328,8 @@ export async function animateMove(state, { isCurrent = () => true } = {}) {
   };
   renderGame(state, { shownP: move.fromP, ...overlay });
   $(`#board .cell[data-idx="${move.idx}"] .stone`)?.classList.add('placed');
-  const order = [...move.flips].sort((a, b) => cellDistance(a, move.idx) - cellDistance(b, move.idx));
+  const size = sideOf(state.board);
+  const order = [...move.flips].sort((a, b) => cellDistance(a, move.idx, size) - cellDistance(b, move.idx, size));
   order.forEach((idx, i) => {
     const stone = $(`#board .cell[data-idx="${idx}"] .stone`);
     if (!stone) return;
@@ -306,7 +338,9 @@ export async function animateMove(state, { isCurrent = () => true } = {}) {
   });
   await wait(order.length ? 300 + order.length * 80 + 400 : 450);
   if (!isCurrent()) return;
-  await animateDate(state, move.fromP, move.dir, move.days, { isCurrent, ...overlay });
+  // 段階1・2は端で止まるので、跳ね返りの経路を作らず、実際に動いた分だけを演出する
+  const days = move.stage > 0 ? Math.abs(move.toP - move.fromP) : move.days;
+  await animateDate(state, move.fromP, move.dir, days, { isCurrent, ...overlay });
   if (!isCurrent()) return;
   // 「真ん中へ」で飛んだ先は、イベントのポップアップを閉じたあとで表示する
   renderGame(state, { shownP: move.toP });
@@ -384,6 +418,24 @@ async function turnPage(ms) {
   board.classList.add('page-turn');
   await wait(ms);
   board.classList.remove('page-turn');
+}
+
+// 盤面が広がる演出: 新しい外周のマスがせり出し、石がなじみ、札が弾む。
+// fromSize: 広がる前の一辺。state は広がったあとの状態。
+// isCurrent: 呼び出し側と揃えるための引数(最後の待ちのあとにする後処理はないので、中では使わない)。
+export async function animateExpand(state, fromSize, { isCurrent = () => true } = {}) {
+  renderGame(state);
+  const size = sideOf(state.board);
+  const off = (size - fromSize) / 2;
+  document.querySelectorAll('#board .cell').forEach((cell) => {
+    const idx = Number(cell.dataset.idx);
+    const r = Math.floor(idx / size);
+    const c = idx % size;
+    if (r < off || r >= size - off || c < off || c >= size - off) cell.classList.add('ring-new');
+  });
+  for (const stone of document.querySelectorAll('#board .stone')) stone.classList.add('settle');
+  glowOnce($('#stage-badge'), 'pulse');
+  await wait(600);
 }
 
 // 選ぶ効果の演出: 鬼は外は消える、固定は金色に光る、奪うは裏返る、植えるは落ちてくる

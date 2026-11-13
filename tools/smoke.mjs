@@ -564,6 +564,150 @@ async function scenarios() {
   // 直す前はページめくり(月替わりごとに毎回250ms)がそのまま積み重なり、約3300msになる見込み。
   check(manyMonthsMs < 2600, `1マスが何日分もある対戦で、日付の演出が長すぎます: ${manyMonthsMs}ms`);
 
+  // 20. 本物の画面で段階1(サドンデス)へ。
+  // 1/1 と 1/10、開始 2026-09-01(黒は 1/10 の人、D=356、N=30)。playToEnd() と同じ打ち方(最初の空きマス、
+  // 選ぶ効果は最初の候補、調整は0)をしても、段階0では誕生日で決着せず、65手目あたりで盤面が埋まって段階1へ進む。
+  // 探し方: 誕生日と開始日の組を総当たりし、Node で js/rules.js をその打ち方で動かして、段階1に着く組を選んだ(同じ誕生日の組は黒白がランダムなので除く)。
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await open(390, 844);
+  await fillSetup({ name: 'いち', m: 1, d: 1 }, { name: 'じゅう', m: 1, d: 10 });
+  await js(`(() => {
+    const f = document.querySelector('#setup-form');
+    f.start.value = '2026-09-01';
+    f.start.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await startFromSetup();
+  const reachedStage1 = await playUntil(`document.querySelector('#event-dialog').open && document.querySelector('#event-title').textContent === 'サドンデス'`);
+  check(reachedStage1, '打ち進めても「サドンデス」のポップアップが出ません');
+  if (reachedStage1) {
+    check(await js(`document.querySelector('#event-player').textContent`) === '盤面が埋まった!', 'サドンデスのポップアップの1行目が違います');
+    const text = await js(`document.querySelector('#event-text').textContent`);
+    check(text.includes('通り越した') && text.includes('1に戻ります'), `サドンデスのポップアップの本文が違います: ${text}`);
+    await js(`document.querySelector('#event-dialog button').click()`);
+    await settled();
+    check(await js(`document.querySelectorAll('#board .cell').length`) === 144, `サドンデスで盤面のマスが144ではありません: ${await js(`document.querySelectorAll('#board .cell').length`)}`);
+    check(await js(`document.querySelector('#board').dataset.size`) === '12', 'サドンデスで #board の data-size が 12 ではありません');
+    check(await js(`!document.querySelector('#stage-badge').hidden && document.querySelector('#stage-badge').textContent === 'サドンデス'`), '札「サドンデス」が出ていません');
+    check(await stoneCount() === 64, `サドンデスの石が64個ではありません: ${await stoneCount()}`);
+    check(await js(`document.querySelector('#board .stone') !== null && [...document.querySelectorAll('#board .stone')].every((s) => s.textContent === '1')`), 'サドンデスに入ったとき石の重さがすべて1に戻っていません');
+    check(await noHorizontalScroll(), 'サドンデスの対戦画面(390px)が横にスクロールします');
+    await send('Emulation.setEmulatedMedia', { features: [] });
+    await sleep(700);
+    await shot('phone-sudden-death');
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    check(await playToEnd(), 'サドンデスから最後まで打っても結果が出ません');
+    await js(`document.querySelector('#result-dialog').close()`);
+    await waitFor(`!document.querySelector('#setup').hidden`, 2000).catch(() => {});
+  }
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
+  // 21. 14×14(段階2)の配置: 幅390と320で、セルが小さくなりすぎず、横にスクロールせず、札が出る
+  for (const [width, minCell, shotName] of [[390, 22, 'phone-14'], [320, 17, 'small-14']]) {
+    await open(width, 844);
+    await fillSetup({ name: 'くろ', m: 10, d: 14 }, { name: 'しろ', m: 12, d: 3 });
+    await startFromSetup();
+    const layout = await js(`(async () => {
+      const rules = await import(new URL('js/rules.js', document.baseURI).href);
+      const dates = await import(new URL('js/dates.js', document.baseURI).href);
+      const ui = await import(new URL('js/ui.js', document.baseURI).href);
+      const match = dates.setupMatch(
+        [{ name: 'くろ', birthday: { m: 10, d: 14 } }, { name: 'しろ', birthday: { m: 12, d: 3 } }],
+        dates.dayNum(2026, 11, 3),
+      );
+      let st = rules.newGame(match);
+      const board = st.board.map((_, i) => ({ color: i % 3 === 0 ? 'W' : 'B', flips: i % 4, fixed: false }));
+      st = { ...st, stage: 2, board: rules.expandBoard(rules.expandBoard(board, 2), 1) };
+      st.board[st.board.length - 1] = null;
+      ui.renderGame(st);
+      const cell = document.querySelector('#board .cell').getBoundingClientRect();
+      return {
+        cells: document.querySelectorAll('#board .cell').length,
+        width: cell.width,
+        badge: document.querySelector('#stage-badge').hidden ? null : document.querySelector('#stage-badge').textContent,
+      };
+    })()`);
+    check(layout.cells === 196, `14×14 のマスが196ではありません(${width}px): ${layout.cells}`);
+    check(await noHorizontalScroll(), `14×14 の対戦画面(${width}px)が横にスクロールします`);
+    check(layout.width >= minCell, `14×14 の1マスの幅が${minCell}px未満です(${width}px): ${layout.width}`);
+    check(layout.badge === 'サドンデス ×2', `14×14 の札が「サドンデス ×2」ではありません(${width}px): ${layout.badge}`);
+    await shot(shotName);
+  }
+
+  // 22. 拡張の演出: 呼んだ直後に新しい外周80マスと石64個の演出が付き、約600msで終わる(動きを減らす設定ではすぐ終わる)
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 10, d: 14 }, { name: 'しろ', m: 12, d: 3 });
+  await startFromSetup();
+  const expandProbe = () => js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'くろ', birthday: { m: 10, d: 14 } }, { name: 'しろ', birthday: { m: 12, d: 3 } }],
+      dates.dayNum(2026, 11, 3),
+    );
+    let st = rules.newGame(match);
+    const board = st.board.map((_, i) => ({ color: i % 2 ? 'W' : 'B', flips: 0, fixed: false }));
+    st = { ...st, stage: 1, board: rules.expandBoard(board, 2) };
+    const t0 = performance.now();
+    const done = ui.animateExpand(st, 8);
+    const counts = {
+      ring: document.querySelectorAll('#board .cell.ring-new').length,
+      settle: document.querySelectorAll('#board .stone.settle').length,
+      pulse: document.querySelector('#stage-badge').classList.contains('pulse'),
+    };
+    await done;
+    return { ...counts, ms: performance.now() - t0 };
+  })()`);
+  const expandNormal = await expandProbe();
+  check(expandNormal.ring === 80, `拡張の演出の .cell.ring-new が80ではありません: ${expandNormal.ring}`);
+  check(expandNormal.settle === 64, `拡張の演出の .stone.settle が64ではありません: ${expandNormal.settle}`);
+  check(expandNormal.pulse, '拡張の演出で #stage-badge に pulse が付いていません');
+  check(expandNormal.ms >= 500 && expandNormal.ms <= 1000, `拡張の演出の長さが500〜1000msではありません: ${expandNormal.ms}ms`);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const expandReduced = await expandProbe();
+  check(expandReduced.ms < 100, `動きを減らす設定で拡張の演出がすぐ終わりません: ${expandReduced.ms}ms`);
+  await send('Emulation.setEmulatedMedia', { features: [] });
+
+  // 23. 段階2の大きな移動: 重さ20の石を返して40マス分(残り3マスの端を越える)でも、端で止まって跳ね返らず、演出も長くならない
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 10, d: 14 }, { name: 'しろ', m: 12, d: 3 });
+  await startFromSetup();
+  const bigMove = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'くろ', birthday: { m: 1, d: 1 } }, { name: 'しろ', birthday: { m: 1, d: 31 } }],
+      dates.dayNum(2026, 1, 4),
+    );
+    let st = rules.newGame(match);
+    st = { ...st, stage: 2, board: Array(196).fill(null) };
+    st.board[30] = { color: 'B', flips: 0, fixed: false };
+    st.board[29] = { color: 'W', flips: 19, fixed: false };
+    const next = rules.playMove(st, 28);
+    ui.renderGame(st);
+    const seen = new Set();
+    let bounceCell = false;
+    const timer = setInterval(() => {
+      seen.add(document.querySelector('#turn-msg').textContent);
+      if (document.querySelector('#board .cell.bounce')) bounceCell = true;
+    }, 50);
+    const t0 = performance.now();
+    await ui.animateMove(next);
+    const ms = performance.now() - t0;
+    clearInterval(timer);
+    return {
+      N: match.N, D: match.D, u0: match.u0, toP: next.lastMove.toP, winner: next.result?.winner, reason: next.result?.reason,
+      messages: [...seen], bounceCell, ms,
+    };
+  })()`);
+  check(bigMove.N === 30 && bigMove.D === 30 && bigMove.u0 === 3, `シナリオ23の対戦の組み立てが想定と違います: ${JSON.stringify(bigMove)}`);
+  check(bigMove.toP === 0 && bigMove.winner === 'B' && bigMove.reason === 'pass', `段階2の大きな移動の結果が想定と違います: ${JSON.stringify(bigMove)}`);
+  check(!bigMove.messages.includes('跳ね返り!'), '段階2の端を越える移動で「跳ね返り!」が出ています');
+  check(!bigMove.messages.includes('対戦終了'), '演出の間に「対戦終了」が出ています');
+  check(!bigMove.bounceCell, '段階2の端を越える移動で .cell.bounce が出ています');
+  check(bigMove.ms < 2600, `段階2の大きな移動の演出が長すぎます: ${bigMove.ms}ms`);
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
@@ -690,8 +834,13 @@ function check(ok, message) {
 // 決着がつくまで打つ。ポップアップは閉じ、選ぶ効果は最初の候補を1回タップし、調整が出たら「0」を選び、
 // 手は最初の空きマスを1回タップして打つ。
 async function playToEnd() {
+  return playUntil(`document.querySelector('#result-dialog').open`);
+}
+
+// stopExpr(ページ内で評価する式)が真になるまで、playToEnd と同じ打ち方で進める
+async function playUntil(stopExpr) {
   for (let step = 0; step < 600; step++) {
-    if (await js(`document.querySelector('#result-dialog').open`)) return true;
+    if (await js(`Boolean(${stopExpr})`)) return true;
     if (await js(`document.querySelector('#event-dialog').open`)) {
       await js(`document.querySelector('#event-dialog button').click()`);
     } else if (await js(`document.querySelector('#board .cell.target') !== null`)) {

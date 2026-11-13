@@ -141,6 +141,18 @@ test('boardDates: 現在の日付の月の1日から64日分', () => {
   assert.equal(dates[63], dayNum(2027, 1, 3));
 });
 
+test('boardDates: マスの数だけ並べる', () => {
+  const day = dayNum(2026, 11, 8);
+  const d144 = boardDates(day, 144);
+  assert.equal(d144.length, 144);
+  assert.equal(d144[0], dayNum(2026, 11, 1));
+  assert.equal(d144[143], dayNum(2026, 11, 1) + 143);
+  const d196 = boardDates(day, 196);
+  assert.equal(d196.length, 196);
+  assert.equal(d196[0], dayNum(2026, 11, 1));
+  assert.equal(d196[195], dayNum(2026, 11, 1) + 195);
+});
+
 test('formatMD / toISODate / parseISODate', () => {
   const n = dayNum(2026, 3, 5);
   assert.equal(formatMD(n), '3/5');

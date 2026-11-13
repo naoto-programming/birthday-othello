@@ -111,11 +111,11 @@ export function defaultStart(birthdayA, birthdayB, year) {
   return arc.from + Math.ceil(arc.len / 2);
 }
 
-// 盤面に印刷する64日分(現在の日付がある月の1日から)
-export function boardDates(currentDay) {
+// 盤面に印刷する count 日分(現在の日付がある月の1日から。既定は8×8の64日、サドンデスでは144日・196日)
+export function boardDates(currentDay, count = 64) {
   const { y, m } = fromDayNum(currentDay);
   const first = dayNum(y, m, 1);
-  return Array.from({ length: 64 }, (_, i) => first + i);
+  return Array.from({ length: count }, (_, i) => first + i);
 }
 
 export function formatMD(day) {
