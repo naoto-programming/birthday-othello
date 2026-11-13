@@ -1,5 +1,5 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, choiceTargets, cropBoard, newGame, playMove, previewMove, sideOf } from './rules.js';
+import { applyChoice, cropBoard, newGame, playMove, previewMove, sideOf } from './rules.js';
 import {
   animateChoice, animateExpand, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
   highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showResult, showRules, showStageDialog,

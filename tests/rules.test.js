@@ -550,6 +550,26 @@ test('段階2: 様子見の代償も2倍', () => {
   assert.equal(next.p, 12);
 });
 
+test('段階2: 14マスの盤面で長い列を返し、2倍で通り越して勝つ', () => {
+  const rows = ['B' + 'W'.repeat(12) + '.', ...Array(13).fill('.'.repeat(14))];
+  const state = stateWith({ stage: 2, N: 20, p: 10, rows });
+  assert.equal(previewMove(state, at14(0, 13)).raw, -14);
+  const next = playMove(state, at14(0, 13));
+  assert.equal(next.lastMove.flips.length, 12);
+  assert.equal(next.lastMove.days, 24);
+  assert.equal(next.lastMove.toP, 0);
+  assert.deepEqual(next.result, { winner: 'B', reason: 'pass', exact: false });
+});
+
+test('段階2: 様子見の代償がちょうど端に届いても勝ち', () => {
+  const state = stateWith({ stage: 2, N: 20, p: 2, turn: 'W', rows: rowsWith('.BW.....') });
+  assert.equal(previewMove(state, at(7, 7)).raw, 0);
+  const next = playMove(state, at(7, 7));
+  assert.equal(next.lastMove.stall, true);
+  assert.equal(next.lastMove.days, 2);
+  assert.deepEqual(next.result, { winner: 'B', reason: 'pass', exact: true });
+});
+
 test('段階1: イベントは今までどおり止まったマスで発動する', () => {
   const next = playMove(stateWith({ stage: 1, p: 10, rows: CENTER4, events: { 9: ev('plus3') } }), at(2, 3));
   assert.equal(next.pending.B.plus3, true);

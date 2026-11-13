@@ -140,10 +140,22 @@ function turnMessage(state, pickIdx, turn, animating) {
   return `${who}の番です`;
 }
 
+// 最後の手の位置を、今の盤面の座標に直す(拡張後は手を打った段階の座標のままなので、外周の分だけずらす)
+const STAGE_SIDES = [8, 12, 14];
+function lastMoveIdx(state) {
+  const { idx, stage } = state.lastMove;
+  if (stage === state.stage) return idx;
+  const from = STAGE_SIDES[stage];
+  const size = sideOf(state.board);
+  const off = (size - from) / 2;
+  return (Math.floor(idx / from) + off) * size + (idx % from) + off;
+}
+
 function renderBoard(state, shownP, pickIdx, shownWeights) {
   const { match } = state;
   const size = sideOf(state.board);
   const board = $('#board');
+  const lastIdx = state.lastMove ? lastMoveIdx(state) : null;
   board.style.setProperty('--size', String(size));
   board.dataset.size = String(size);
   const today = dateOf(state, shownP);
@@ -178,7 +190,7 @@ function renderBoard(state, shownP, pickIdx, shownWeights) {
       const weight = shownWeights?.get(idx) ?? stoneWeight(stone);
       cell.append(span(classes.join(' '), String(weight)));
     }
-    if (state.lastMove?.idx === idx) cell.classList.add('last');
+    if (lastIdx === idx) cell.classList.add('last');
     cell.setAttribute('aria-label', `${formatMD(day)} ${stone ? `${COLOR_NAME[stone.color]}の石` : '空き'}`);
     return cell;
   });
@@ -436,6 +448,7 @@ export async function animateExpand(state, fromSize, { isCurrent = () => true } 
   for (const stone of document.querySelectorAll('#board .stone')) stone.classList.add('settle');
   glowOnce($('#stage-badge'), 'pulse');
   await wait(600);
+  if (isCurrent()) renderGame(state); // 演出用の一時的なクラスを外す(今日のマスの脈動も戻る)
 }
 
 // 選ぶ効果の演出: 鬼は外は消える、固定は金色に光る、奪うは裏返る、植えるは落ちてくる

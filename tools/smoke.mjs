@@ -91,7 +91,7 @@ console.log(`OK: スクリーンショットを ${fileURLToPath(OUT)} に保存�
 // ---- シナリオ ----
 
 async function scenarios() {
-  // 1. スマホ幅: 設定 → 空の盤面 → 予告 → 決定、序盤の3手
+  // 1. スマホ幅: 設定 → 空の盤面 → マスをタップして置く、序盤の3手
   await open(390, 844);
   await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
   const setupText = await js(`document.querySelector('#setup-preview').textContent`);
@@ -583,8 +583,15 @@ async function scenarios() {
     check(await js(`document.querySelector('#event-player').textContent`) === '盤面が埋まった!', 'サドンデスのポップアップの1行目が違います');
     const text = await js(`document.querySelector('#event-text').textContent`);
     check(text.includes('通り越した') && text.includes('1に戻ります'), `サドンデスのポップアップの本文が違います: ${text}`);
+    // ポップアップの間は、盤面はまだ手を打った時の8×8のまま(viewBefore)
+    check(await js(`document.querySelectorAll('#board .cell').length === 64 && document.querySelector('#board').dataset.size === '8'`), 'サドンデスのポップアップの間、盤面が8×8のままではありません');
     await js(`document.querySelector('#event-dialog button').click()`);
     await settled();
+    const lastCells = await js(`[...document.querySelectorAll('#board .cell.last')].map((c) => ({ idx: Number(c.dataset.idx), stone: c.querySelector('.stone') !== null }))`);
+    check(
+      lastCells.length === 1 && lastCells[0].stone && [Math.floor(lastCells[0].idx / 12), lastCells[0].idx % 12].every((v) => v >= 2 && v <= 9),
+      `拡張後の最後の手の印が、中央の8×8の石の上にありません: ${JSON.stringify(lastCells)}`,
+    );
     check(await js(`document.querySelectorAll('#board .cell').length`) === 144, `サドンデスで盤面のマスが144ではありません: ${await js(`document.querySelectorAll('#board .cell').length`)}`);
     check(await js(`document.querySelector('#board').dataset.size`) === '12', 'サドンデスで #board の data-size が 12 ではありません');
     check(await js(`!document.querySelector('#stage-badge').hidden && document.querySelector('#stage-badge').textContent === 'サドンデス'`), '札「サドンデス」が出ていません');
@@ -656,11 +663,13 @@ async function scenarios() {
       pulse: document.querySelector('#stage-badge').classList.contains('pulse'),
     };
     await done;
+    counts.ringAfter = document.querySelectorAll('#board .cell.ring-new').length;
     return { ...counts, ms: performance.now() - t0 };
   })()`);
   const expandNormal = await expandProbe();
   check(expandNormal.ring === 80, `拡張の演出の .cell.ring-new が80ではありません: ${expandNormal.ring}`);
   check(expandNormal.settle === 64, `拡張の演出の .stone.settle が64ではありません: ${expandNormal.settle}`);
+  check(expandNormal.ringAfter === 0, `拡張の演出のあと .cell.ring-new が残っています: ${expandNormal.ringAfter}`);
   check(expandNormal.pulse, '拡張の演出で #stage-badge に pulse が付いていません');
   check(expandNormal.ms >= 500 && expandNormal.ms <= 1000, `拡張の演出の長さが500〜1000msではありません: ${expandNormal.ms}ms`);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
