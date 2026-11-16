@@ -1,7 +1,7 @@
 // 本物のルール(js/rules.js)で、ていねいなAI同士を対戦させてバランスを確かめる。
 // 使い方: caffeinate -i npm run balance(対局数を変えるときは npm run balance -- 400)
 import { defaultStart, setupMatch } from '../js/dates.js';
-import { applyChoice, choiceTargets, newGame, playMove, previewMove } from '../js/rules.js';
+import { applyChoice, canPlace, choiceTargets, newGame, playMove, previewMove } from '../js/rules.js';
 
 const GAMES = Number(process.argv[2] ?? 200);
 if (!Number.isInteger(GAMES) || GAMES <= 0) {
@@ -22,7 +22,7 @@ function randomBirthday() {
 function candidates(state) {
   const out = [];
   for (let idx = 0; idx < state.board.length; idx++) {
-    if (state.board[idx]) continue;
+    if (!canPlace(state, idx)) continue;
     const adjusts = previewMove(state, idx, { adjust: 0 }).needsAdjust ? [-3, -2, -1, 0, 1, 2, 3] : [0];
     for (const adjust of adjusts) out.push({ idx, adjust });
   }
@@ -68,7 +68,7 @@ function carefulMove(state) {
 function playGame() {
   const a = { name: 'A', birthday: randomBirthday() };
   const b = { name: 'B', birthday: randomBirthday() };
-  let state = newGame(setupMatch([a, b], defaultStart(a.birthday, b.birthday, 2026)));
+  let state = newGame(setupMatch([a, b], defaultStart(a.birthday, b.birthday, 2026)), { opening: true });
   let moves = 0;
   let events = 0;
   while (state.phase !== 'over' && moves < MAX_MOVES) {

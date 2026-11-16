@@ -4,6 +4,7 @@ import { dayNum } from '../js/dates.js';
 import {
   reflect, stoneWeight, newGame, flipLines, computeFlips, canFlipAnywhere, previewMove, moveDays, playMove,
   countStones, judgeFull, choiceTargets, applyChoice, sideOf, expandBoard, cropBoard,
+  seededRandom, openingBoard, forbiddenCells, isRestricted, canPlace,
 } from '../js/rules.js';
 
 const at = (r, c) => r * 8 + c;
@@ -650,4 +651,104 @@ test('段階1から2へ広がるときも重さは1に戻る', () => {
   const next = playMove(state, 0);
   assert.equal(next.stage, 2);
   assert.ok(next.board.filter(Boolean).every((stone) => stone.flips === 0));
+});
+
+// ---- v4: 最初の石と序盤の制限 ----
+
+const adjacent8 = (a, b) => Math.abs(Math.floor(a / 8) - Math.floor(b / 8)) <= 1 && Math.abs((a % 8) - (b % 8)) <= 1;
+const openingState = (opts) => Object.assign(stateWith(opts), { opening: true });
+
+test('seededRandom: 同じ値なら同じ列、違う値なら違う列', () => {
+  const seq = (seed) => { const r = seededRandom(seed); return Array.from({ length: 8 }, () => r()); };
+  assert.deepEqual(seq(5), seq(5));
+  assert.notDeepEqual(seq(5), seq(6));
+  assert.ok(seq(5).every((x) => x >= 0 && x < 1));
+});
+
+test('openingBoard: 黒2・白2で、どの2つも周り8マスに入らない', () => {
+  for (let seed = 1; seed <= 50; seed++) {
+    const board = openingBoard(seededRandom(seed));
+    const idxs = board.flatMap((s, i) => (s ? [i] : []));
+    assert.equal(idxs.length, 4);
+    assert.equal(idxs.filter((i) => board[i].color === 'B').length, 2);
+    assert.equal(idxs.filter((i) => board[i].color === 'W').length, 2);
+    for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) assert.ok(!adjacent8(idxs[a], idxs[b]));
+    assert.deepEqual(openingBoard(seededRandom(seed)), board);
+  }
+});
+
+test('newGame: 既定では空の盤面で、制限もない', () => {
+  const state = newGame(testMatch());
+  assert.equal(state.board.filter(Boolean).length, 0);
+  assert.equal(state.opening, false);
+  assert.deepEqual(forbiddenCells(state), []);
+});
+
+test('newGame: opening のとき最初の石があり、手の数は0から', () => {
+  const state = newGame(testMatch(), { opening: true, random: seededRandom(7) });
+  assert.equal(state.board.filter(Boolean).length, 4);
+  assert.deepEqual(state.movesMade, { B: 0, W: 0 });
+});
+
+test('forbiddenCells: 最初の3手は自分の石の周りに置けない', () => {
+  const state = openingState({ rows: rowsWith('...B.W..') });
+  assert.deepEqual(forbiddenCells(state), [at(2, 2), at(2, 3), at(2, 4), at(3, 2), at(3, 4), at(4, 2), at(4, 3), at(4, 4)]);
+  assert.equal(isRestricted(state), true);
+  assert.equal(canPlace(state, at(3, 4)), false);
+  assert.equal(canPlace(state, at(3, 6)), true);
+  assert.equal(playMove(state, at(2, 2)), state);
+});
+
+test('forbiddenCells: 4手目からは制限がない', () => {
+  const state = openingState({ rows: rowsWith('...B.W..') });
+  state.movesMade.B = 3;
+  assert.deepEqual(forbiddenCells(state), []);
+  assert.equal(isRestricted(state), false);
+  assert.equal(canPlace(state, at(2, 2)), true);
+});
+
+test('forbiddenCells: 置けるマスがなければどこでも', () => {
+  const state = openingState({ rows: ['B.WWWWWW', '..WWWWWW', ...Array(6).fill('WWWWWWWW')] });
+  assert.deepEqual(forbiddenCells(state), []);
+  assert.equal(isRestricted(state), true);
+  assert.equal(canPlace(state, at(1, 1)), true);
+});
+
+test('playMove: 打つと手の数が増え、効果では増えない', () => {
+  const state = openingState({ p: 10, rows: rowsWith('.WB.....'), events: { 9: ev('plant') } });
+  const mid = playMove(state, at(3, 0));
+  assert.equal(mid.p, 9);
+  assert.equal(mid.phase, 'choose');
+  assert.deepEqual(mid.movesMade, { B: 1, W: 0 });
+  const done = applyChoice(mid, at(7, 7));
+  assert.equal(done.movesMade.B, 1);
+});
+
+test('playMove: もう一手で続けて打つ手も1手と数える', () => {
+  const state = openingState({ p: 10, rows: rowsWith('.WB.....'), events: { 9: ev('extraTurn') } });
+  const first = playMove(state, at(3, 0));
+  assert.equal(first.turn, 'B');
+  assert.equal(first.movesMade.B, 1);
+  const second = playMove(first, at(7, 7));
+  assert.equal(second.movesMade.B, 2);
+});
+
+const CLAMP_ROWS = ['........', '..B.....', '..W.....', '........', '..B.....', '........', '........', '........'];
+
+test('previewMove: 置けないマスでしか挟めなければ代償はない', () => {
+  const state = openingState({ p: 10, rows: CLAMP_ROWS });
+  const pv = previewMove(state, at(7, 7));
+  assert.equal(pv.stall, false);
+  assert.equal(pv.days, 0);
+  assert.equal(pv.toP, 10);
+  state.opening = false;
+  const pv2 = previewMove(state, at(7, 7));
+  assert.equal(pv2.stall, true);
+  assert.equal(pv2.toP, 11);
+});
+
+test('canFlipAnywhere: forbidden のマスは調べない', () => {
+  const board = boardFrom(CLAMP_ROWS);
+  assert.equal(canFlipAnywhere(board, 'B'), true);
+  assert.equal(canFlipAnywhere(board, 'B', [at(3, 2)]), false);
 });

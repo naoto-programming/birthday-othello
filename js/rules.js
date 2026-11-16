@@ -58,8 +58,43 @@ const SELF_EFFECTS = ['double', 'plus3', 'adjust'];
 const OPPONENT_EFFECTS = ['rest', 'reverse'];
 const CHOICE_EFFECTS = ['remove', 'fix', 'steal', 'plant'];
 
+// 序盤の制限: 最初の何手まで、自分の石の周り8マスに置けないか
+export const OPENING_TURNS = 3;
+
+// 決まった乱数(mulberry32)。0以上1未満を返す関数を作る
+export function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// 最初の石の盤面: 黒・白・黒・白の順に1個ずつ。すでに置いた石の周り8マスには置かない。
+export function openingBoard(random) {
+  const board = Array(SIZE * SIZE).fill(null);
+  const placed = [];
+  for (const color of ['B', 'W', 'B', 'W']) {
+    const candidates = [];
+    for (let idx = 0; idx < board.length; idx++) {
+      if (board[idx]) continue;
+      const r = Math.floor(idx / SIZE);
+      const c = idx % SIZE;
+      if (placed.every((q) => Math.abs(Math.floor(q / SIZE) - r) > 1 || Math.abs((q % SIZE) - c) > 1)) candidates.push(idx);
+    }
+    const idx = candidates[Math.floor(random() * candidates.length)];
+    board[idx] = { color, flips: 0, fixed: false };
+    placed.push(idx);
+  }
+  return board;
+}
+
 // match: setupMatch の戻り値(D: 誕生日の間の日数、N: マス数、u0: 開始マス)
-export function newGame(match) {
+// opening が真なら最初の石を置いて始め、最初の OPENING_TURNS 手は自分の石の周りに置けない。
+export function newGame(match, { opening = false, random = Math.random } = {}) {
   const { baseDay, D, N } = match;
   const events = {};
   for (const { day, event } of listEventDays(baseDay + 1, baseDay + D - 1)) {
@@ -68,7 +103,9 @@ export function newGame(match) {
   }
   return {
     match,
-    board: Array(SIZE * SIZE).fill(null),
+    board: opening ? openingBoard(random) : Array(SIZE * SIZE).fill(null),
+    opening,
+    movesMade: { B: 0, W: 0 },
     events,
     turn: 'B',
     p: match.u0,
@@ -114,10 +151,46 @@ export function computeFlips(board, idx, color) {
   return flipLines(board, idx, color).flatMap((line) => line.cells);
 }
 
-// color の番で、どこかのマスに石を挟める手があるか
-export function canFlipAnywhere(board, color) {
+// 序盤の制限がかかっている手番か(置けるマスがなくて自由に置ける手番でも真)
+export function isRestricted(state, color = state.turn) {
+  return Boolean(state.opening) && state.movesMade[color] < OPENING_TURNS;
+}
+
+// この手で置けない空きマス(小さい順)。制限中は color の石の周り8マス。空きマスがすべて該当するなら [](どこにでも置ける)。
+export function forbiddenCells(state, color = state.turn) {
+  if (!isRestricted(state, color)) return [];
+  const { board } = state;
+  const side = sideOf(board);
+  const cells = [];
+  let empties = 0;
+  board.forEach((stone, idx) => {
+    if (stone) return;
+    empties += 1;
+    const r = Math.floor(idx / side);
+    const c = idx % side;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr;
+        const cc = c + dc;
+        if ((dr || dc) && rr >= 0 && rr < side && cc >= 0 && cc < side && board[rr * side + cc]?.color === color) {
+          cells.push(idx);
+          return;
+        }
+      }
+    }
+  });
+  return cells.length === empties ? [] : cells;
+}
+
+// 空きマスで、この手で置けるか
+export function canPlace(state, idx) {
+  return !state.board[idx] && !forbiddenCells(state).includes(idx);
+}
+
+// color の番で、どこかのマスに石を挟める手があるか(forbidden のマスは調べない)
+export function canFlipAnywhere(board, color, forbidden = []) {
   for (let idx = 0; idx < board.length; idx++) {
-    if (!board[idx] && flipLines(board, idx, color).length > 0) return true;
+    if (!board[idx] && !forbidden.includes(idx) && flipLines(board, idx, color).length > 0) return true;
   }
   return false;
 }
@@ -149,7 +222,7 @@ export function previewMove(state, idx, { adjust: adjustOption } = {}) {
   // 調整ボタンを出さない(出しても選んでも効果がなく、紛らわしいため)。
   const needsAdjust = pending.adjust && base > 0 && !pending.rest;
   const adjust = needsAdjust ? Math.max(-3, Math.min(3, adjustOption ?? 0)) : 0;
-  const penalty = base === 0 && canFlipAnywhere(state.board, color);
+  const penalty = base === 0 && canFlipAnywhere(state.board, color, forbiddenCells(state));
   const { days: baseDays, dir, stall } = moveDays(base, pending, color, adjust, penalty);
   const days = baseDays * (state.stage === 2 ? 2 : 1);
   const raw = state.p + dir * days;
@@ -173,7 +246,7 @@ export function previewMove(state, idx, { adjust: adjustOption } = {}) {
 }
 
 export function playMove(state, idx, { adjust } = {}) {
-  if (state.phase !== 'play' || state.board[idx]) return state;
+  if (state.phase !== 'play' || !canPlace(state, idx)) return state;
   const move = previewMove(state, idx, { adjust });
   const next = structuredClone(state);
   const color = next.turn;
@@ -182,6 +255,7 @@ export function playMove(state, idx, { adjust } = {}) {
     next.board[i].color = color;
     next.board[i].flips += 1;
   }
+  next.movesMade[color] += 1;
   next.pending[color] = emptyPending();
   const fromP = next.p;
   next.p = move.toP;
