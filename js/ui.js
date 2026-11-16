@@ -1,5 +1,7 @@
 import { boardDates, formatMD, fromDayNum, squareOffset, squarePeriod } from './dates.js';
-import { choiceTargets, countStones, previewMove, reflect, sideOf, stoneWeight } from './rules.js';
+import {
+  choiceTargets, countStones, forbiddenCells, isRestricted, OPENING_TURNS, previewMove, reflect, sideOf, stoneWeight,
+} from './rules.js';
 import { EFFECTS, EVENTS, ruleLabel } from './events.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,13 +98,14 @@ export function renderGame(state, {
   shownP = state.p, pickIdx = null, turnOverride = null, shownWeights = null,
 } = {}) {
   const turn = turnOverride ?? state.turn;
+  $('#notice').textContent = '';
   $('#today-date').textContent = formatLong(dateOf(state, shownP));
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
   renderPlayerStatus($('#status-black'), state, 'B', shownP, turn, turnOverride !== null);
   renderPlayerStatus($('#status-white'), state, 'W', shownP, turn, turnOverride !== null);
   $('#turn-msg').textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
   renderStageBadge(state);
-  renderBoard(state, shownP, pickIdx, shownWeights);
+  renderBoard(state, shownP, pickIdx, shownWeights, turnOverride === null);
   renderAdjustPanel(state, pickIdx);
 }
 
@@ -137,7 +140,24 @@ function turnMessage(state, pickIdx, turn, animating) {
   const who = `${player.name}(${COLOR_NAME[turn]})`;
   if (state.phase === 'choose') return `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
   if (pickIdx !== null) return `${who}: 調整を選んでください`;
+  if (isRestricted(state)) {
+    if (forbiddenCells(state).length === 0) return `${who}の番です(置ける場所がないので、どこにでも置けます)`;
+    return `${who}の番です(あと${OPENING_TURNS - state.movesMade[turn]}ターン: 自分の石の周りには置けません)`;
+  }
   return `${who}の番です`;
+}
+
+// 盤面の下に短い注意を出す(次の renderGame で消える)
+export function showNotice(text) {
+  $('#notice').textContent = text;
+}
+
+// 最初の石を順番に落とす(黒・白・黒・白)。待たない
+export function animateOpening() {
+  document.querySelectorAll('#board .stone').forEach((stone, i) => {
+    stone.classList.add('placed');
+    stone.style.animationDelay = `${i * 150}ms`;
+  });
 }
 
 // 最後の手の位置を、今の盤面の座標に直す(拡張後は手を打った段階の座標のままなので、外周の分だけずらす)
@@ -151,7 +171,7 @@ function lastMoveIdx(state) {
   return (Math.floor(idx / from) + off) * size + (idx % from) + off;
 }
 
-function renderBoard(state, shownP, pickIdx, shownWeights) {
+function renderBoard(state, shownP, pickIdx, shownWeights, showForbidden) {
   const { match } = state;
   const size = sideOf(state.board);
   const board = $('#board');
@@ -162,6 +182,8 @@ function renderBoard(state, shownP, pickIdx, shownWeights) {
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
   const eventByDay = new Map(Object.values(state.events).map((ev) => [ev.day, ev]));
   const targets = new Set(state.phase === 'choose' ? choiceTargets(state) : []);
+  // 序盤で今の手番が置けないマス(演出中は出さない)
+  const forbidden = new Set(showForbidden && state.phase === 'play' ? forbiddenCells(state) : []);
   const cells = boardDates(today, size * size).map((day, idx) => {
     const cell = document.createElement('button');
     cell.type = 'button';
@@ -180,6 +202,7 @@ function renderBoard(state, shownP, pickIdx, shownWeights) {
     const ev = eventByDay.get(day);
     if (ev) cell.classList.add(ev.used ? 'event-used' : 'event');
     if (targets.has(idx)) cell.classList.add('target');
+    if (forbidden.has(idx)) cell.classList.add('forbidden');
     if (idx === pickIdx) cell.classList.add('picked');
     const stone = state.board[idx];
     if (stone) {

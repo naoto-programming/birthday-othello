@@ -266,7 +266,8 @@ async function scenarios() {
     const r = document.querySelector('#adjust-panel').getBoundingClientRect();
     return { top: r.top, bottom: r.bottom };
   })()`);
-  check(panelRect.top >= 0 && panelRect.bottom <= 553, `調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(panelRect)}`);
+  // 注意欄の高さが小数なので、丸めの分だけ1pxの余裕を持たせる
+  check(panelRect.top >= 0 && panelRect.bottom <= 553 + 1, `調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(panelRect)}`);
   check(await js(`document.querySelectorAll('#adjust-panel .adjust-row button[data-adjust]').length`) === 7, '調整のボタンが7つではありません');
   check(await js(`document.querySelector('#adjust-panel [data-adjust="1"]').textContent`).then((t) => t.includes('勝ち')), '調整+1の文言に「勝ち」がありません');
   check(await js(`document.querySelector('#adjust-panel [data-adjust="2"]').textContent`).then((t) => t.includes('3マス')), '調整+2の文言に「3マス」がありません');
@@ -717,6 +718,106 @@ async function scenarios() {
   check(!bigMove.bounceCell, '段階2の端を越える移動で .cell.bounce が出ています');
   check(bigMove.ms < 2600, `段階2の大きな移動の演出が長すぎます: ${bigMove.ms}ms`);
 
+  // 24. 序盤(スマホ幅): 最初の石4個、置けないマスの斜線、注意、3手ずつ後に制限が消える
+  const openingPlacement = `(() => {
+    const idxOf = (cls) => [...document.querySelectorAll('#board .cell')].filter((c) => c.querySelector('.stone.' + cls)).map((c) => Number(c.dataset.idx));
+    const black = idxOf('black');
+    const white = idxOf('white');
+    const all = [...black, ...white];
+    const isolated = all.every((a) => all.every((b) => a === b || Math.abs(Math.floor(a / 8) - Math.floor(b / 8)) > 1 || Math.abs((a % 8) - (b % 8)) > 1));
+    const near = (i) => black.some((b) => Math.abs(Math.floor(b / 8) - Math.floor(i / 8)) <= 1 && Math.abs((b % 8) - (i % 8)) <= 1);
+    const expected = [...document.querySelectorAll('#board .cell:not(.has-stone)')].map((c) => Number(c.dataset.idx)).filter(near);
+    const forbidden = [...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx));
+    return { black, white, isolated, expected, forbidden };
+  })()`;
+  const startOpening = async () => {
+    await fillSetup({ name: 'くろ', m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
+    await js(`(() => {
+      const f = document.querySelector('#setup-form');
+      f.start.value = '2026-03-01';
+      f.start.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await startFromSetup();
+  };
+  await open(390, 844, 'seed=3');
+  await startOpening();
+  const op1 = await js(openingPlacement);
+  check(op1.black.length === 2 && op1.white.length === 2, `最初の石が黒2・白2ではありません: ${JSON.stringify(op1)}`);
+  check(op1.isolated, `最初の石の周り8マスに別の石があります: ${JSON.stringify(op1)}`);
+  check(await js(`document.querySelectorAll('#board .stone.placed').length`) === 4, '開始直後の石に placed が付いていません');
+  check(
+    op1.forbidden.length > 0 && JSON.stringify(op1.forbidden) === JSON.stringify(op1.expected),
+    `置けないマスが黒の石の周り8マスの空きマスと一致しません: ${JSON.stringify(op1)}`,
+  );
+  check((await js(`document.querySelector('#turn-msg').textContent`)).includes('あと3ターン'), '開始直後の手番表示に「あと3ターン」がありません');
+  check(await noHorizontalScroll(), '開始直後の対戦画面(390px)が横にスクロールします');
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await shot('phone-opening');
+  await send('Emulation.setEmulatedMedia', { features: [] });
+  // 置けないマスをタップ: 石は増えず、注意が出る
+  await tapCell(op1.forbidden[0]);
+  await sleep(100);
+  check(await stoneCount() === 4, '置けないマスをタップしたのに石が増えました');
+  check(await js(`document.querySelector('#notice').textContent`) === '自分の石の周りには置けません', '置けないマスをタップしても注意が出ません');
+  // 黒と白が交互に3手ずつ
+  for (let i = 0; i < 6; i++) {
+    const count = await stoneCount();
+    await playUntil(`document.querySelectorAll('#board .stone').length > ${count}`);
+  }
+  check(await js(`document.querySelectorAll('#board .cell.forbidden').length`) === 0, '6手のあとも置けないマスの印が残っています');
+  check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと'), '6手のあとも手番表示に「あと」が残っています');
+  // 同じ seed なら最初の石は同じ
+  await open(390, 844, 'seed=3');
+  await startOpening();
+  const op2 = await js(openingPlacement);
+  check(
+    JSON.stringify([op1.black, op1.white]) === JSON.stringify([op2.black, op2.white]),
+    `同じ seed なのに最初の石が違います: ${JSON.stringify([op1.black, op1.white])} / ${JSON.stringify([op2.black, op2.white])}`,
+  );
+  // 設定に戻って始め直す: 新しい配置に合った印、注意は空、あと3ターン
+  await tapCell(op2.forbidden[0]);
+  check(await js(`document.querySelector('#notice').textContent`) !== '', '注意が出ていません(始め直しの確認の前提)');
+  await js(`document.querySelector('[data-action="quit"]').click()`);
+  await waitFor(`!document.querySelector('#setup').hidden`);
+  await startFromSetup();
+  const op3 = await js(openingPlacement);
+  check(
+    op3.forbidden.length > 0 && JSON.stringify(op3.forbidden) === JSON.stringify(op3.expected),
+    `始め直した盤面で、置けないマスが配置と合っていません: ${JSON.stringify(op3)}`,
+  );
+  check(await js(`document.querySelector('#notice').textContent`) === '', '始め直したあとも注意が残っています');
+  check((await js(`document.querySelector('#turn-msg').textContent`)).includes('あと3ターン'), '始め直したあとの手番表示に「あと3ターン」がありません');
+  // 幅320でも開始直後に横スクロールしない
+  await open(320, 640, 'seed=3');
+  await startOpening();
+  check(await noHorizontalScroll(), '開始直後の対戦画面(320px)が横にスクロールします');
+
+  // 25. 置けるマスがないとき(空きがすべて自分の石の周り)は、印を出さず「どこにでも置けます」と出す
+  await open(390, 844);
+  const fallbackView = await js(`(async () => {
+    const rules = await import(new URL('js/rules.js', document.baseURI).href);
+    const dates = await import(new URL('js/dates.js', document.baseURI).href);
+    const ui = await import(new URL('js/ui.js', document.baseURI).href);
+    const match = dates.setupMatch(
+      [{ name: 'くろ', birthday: { m: 1, d: 1 } }, { name: 'しろ', birthday: { m: 7, d: 1 } }],
+      dates.dayNum(2026, 3, 1),
+    );
+    let st = rules.newGame(match);
+    const board = Array(64).fill(null).map(() => ({ color: 'W', flips: 0, fixed: false }));
+    for (const r of [2, 3, 4]) for (const c of [2, 3, 4]) board[r * 8 + c] = null;
+    board[27] = { color: 'B', flips: 0, fixed: false };
+    st = { ...st, board, turn: 'B', opening: true, movesMade: { B: 0, W: 0 } };
+    document.querySelector('#setup').hidden = true;
+    document.querySelector('#game').hidden = false;
+    ui.renderGame(st);
+    return {
+      forbidden: document.querySelectorAll('#board .cell.forbidden').length,
+      msg: document.querySelector('#turn-msg').textContent,
+    };
+  })()`);
+  check(fallbackView.forbidden === 0, `置ける場所がないのに置けないマスの印が出ています: ${JSON.stringify(fallbackView)}`);
+  check(fallbackView.msg.includes('どこにでも置けます'), `フォールバックの手番表示が想定と違います: ${fallbackView.msg}`);
+
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
 }
@@ -784,10 +885,11 @@ async function waitFor(expression, timeout = 8000) {
   throw new Error(`待っても条件を満たしませんでした: ${expression}`);
 }
 
-async function open(width, height) {
+// query: URL の問い合わせ。既定の opening=off は v3 と同じ始まり方(空の盤面・制限なし)にする
+async function open(width, height, query = 'opening=off') {
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: width < 600 });
   const loaded = once('Page.loadEventFired');
-  await send('Page.navigate', { url: appUrl });
+  await send('Page.navigate', { url: appUrl + (query ? `?${query}` : '') });
   await loaded;
   await waitFor(`document.querySelector('#setup-preview').textContent.length > 0`);
 }
@@ -841,7 +943,7 @@ function check(ok, message) {
 }
 
 // 決着がつくまで打つ。ポップアップは閉じ、選ぶ効果は最初の候補を1回タップし、調整が出たら「0」を選び、
-// 手は最初の空きマスを1回タップして打つ。
+// 手は最初の空きマス(序盤で置けない印のマスは除く)を1回タップして打つ。
 async function playToEnd() {
   return playUntil(`document.querySelector('#result-dialog').open`);
 }
@@ -858,7 +960,7 @@ async function playUntil(stopExpr) {
     } else if (await js(`!document.querySelector('#adjust-panel').hidden`)) {
       await js(`document.querySelector('#adjust-panel [data-adjust="0"]').click()`);
     } else {
-      const idx = await js(`document.querySelector('#board .cell:not(.has-stone)')?.dataset.idx ?? null`);
+      const idx = await js(`document.querySelector('#board .cell:not(.has-stone):not(.forbidden)')?.dataset.idx ?? null`);
       if (idx === null) {
         await sleep(100);
         continue;

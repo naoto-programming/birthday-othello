@@ -46,6 +46,7 @@
           <div id="status-white" class="pl white"></div>
         </div>
         <p id="turn-msg" class="turn-msg" aria-live="polite"></p>
+        <p id="notice" class="notice" aria-live="polite"></p>
       </header>
       <div class="board-wrap"><div id="board" class="board"></div></div>
       <div id="adjust-panel" class="adjust-panel card" hidden aria-live="polite"></div>
@@ -87,7 +88,8 @@
   <dialog id="rules-dialog" class="card">
     <h2>ルール</h2>
     <ul class="rules">
-      <li>盤面は空っぽから始まります。空いているマスならどこにでも置けます。</li>
+      <li>最初に黒白2個ずつの石が、ランダムな場所に置かれます。空いているマスならどこにでも置けます。</li>
+      <li>ただし、最初の3ターンは、自分の石の周り8マスには置けません(置ける場所がないときは、どこにでも置けます)。</li>
       <li>相手の石を挟むと、挟んだ列の石がすべて裏返ります。</li>
       <li>裏返した石の数字(重さ)の合計だけ、日付がマスを動きます。黒は黒の誕生日へ、白は白の誕生日へ引っぱります。</li>
       <li>石の重さは「1 + 裏返った回数」です。</li>

@@ -124,6 +124,8 @@ button { font: inherit; cursor: pointer; }
 }
 .cell.picked::before { content: ""; position: absolute; inset: 2px; border: 3px solid var(--accent); border-radius: 4px; pointer-events: none; }
 .cell.last .stone { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cell.forbidden::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(45deg, rgba(138, 123, 114, 0.22) 0 3px, transparent 3px 7px); pointer-events: none; }
+.notice { text-align: center; margin: 4px 0 0; color: var(--accent); font-size: 0.85rem; min-height: 1.2em; }
 .stone {
   width: 66%;
   aspect-ratio: 1;

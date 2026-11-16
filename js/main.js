@@ -1,8 +1,8 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, cropBoard, newGame, playMove, previewMove, sideOf } from './rules.js';
+import { applyChoice, canPlace, cropBoard, newGame, playMove, previewMove, seededRandom, sideOf } from './rules.js';
 import {
-  animateChoice, animateExpand, animateMove, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
-  highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showResult, showRules, showStageDialog,
+  animateChoice, animateExpand, animateMove, animateOpening, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
+  highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showNotice, showResult, showRules, showStageDialog,
 } from './ui.js';
 
 const form = document.querySelector('#setup-form');
@@ -10,6 +10,11 @@ const setupScreen = document.querySelector('#setup');
 const gameScreen = document.querySelector('#game');
 const boardEl = document.querySelector('#board');
 const panelEl = document.querySelector('#adjust-panel');
+
+// URL の問い合わせ(確認用): ?opening=off で序盤の石と制限をなくす、?seed=数字 で最初の石の配置を固定する
+const params = new URLSearchParams(location.search);
+const opening = params.get('opening') !== 'off';
+const seed = params.get('seed');
 
 let state = null;
 let busy = false;
@@ -66,10 +71,11 @@ function startGame() {
   if (match.error) return;
   epoch += 1;
   pickIdx = null;
-  state = newGame(match);
+  state = newGame(match, { opening, random: seed !== null ? seededRandom(Number(seed)) : Math.random });
   setupScreen.hidden = true;
   gameScreen.hidden = false;
   renderGame(state);
+  if (state.opening) animateOpening();
 }
 
 function backToSetup() {
@@ -169,6 +175,10 @@ async function tapCell(idx) {
     return;
   }
   if (state.phase !== 'play' || state.board[idx]) return;
+  if (!canPlace(state, idx)) {
+    showNotice('自分の石の周りには置けません');
+    return;
+  }
   pickIdx = null;
   if (previewMove(state, idx).needsAdjust) {
     pickIdx = idx;
