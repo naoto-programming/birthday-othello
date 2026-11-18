@@ -98,7 +98,7 @@ export function renderGame(state, {
   shownP = state.p, pickIdx = null, turnOverride = null, shownWeights = null,
 } = {}) {
   const turn = turnOverride ?? state.turn;
-  $('#notice').textContent = '';
+  renderOpeningLine(state, turnOverride !== null);
   $('#today-date').textContent = formatLong(dateOf(state, shownP));
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
   renderPlayerStatus($('#status-black'), state, 'B', shownP, turn, turnOverride !== null);
@@ -140,20 +140,31 @@ function turnMessage(state, pickIdx, turn, animating) {
   const who = `${player.name}(${COLOR_NAME[turn]})`;
   if (state.phase === 'choose') return `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
   if (pickIdx !== null) return `${who}: 調整を選んでください`;
-  // 手の演出中は、次の手番の制限を出さない(打った人の名前と食い違うため)
-  if (!animating && isRestricted(state)) {
-    if (forbiddenCells(state).length === 0) return `${who}の番です(置ける場所がないので、どこにでも置けます)`;
-    return `${who}の番です(あと${OPENING_TURNS - state.movesMade[turn]}ターン: 自分の石の周りには置けません)`;
-  }
   return `${who}の番です`;
 }
 
-// 盤面の下に短い注意を出す(次の renderGame で消える)
-export function showNotice(text) {
-  $('#notice').textContent = text;
+// 序盤の間だけ、手番の文の下に1行を確保する(盤が動かないように)。
+// 制限の説明はここに出す。手の演出中は、次の手番の制限を出さない(打った人の名前と食い違うため)
+function renderOpeningLine(state, animating) {
+  const notice = $('#notice');
+  const restricted = state.opening && state.phase !== 'over' && (isRestricted(state, 'B') || isRestricted(state, 'W'));
+  $('.status').classList.toggle('opening', restricted);
+  notice.classList.remove('alert');
+  notice.textContent = '';
+  if (animating || state.phase !== 'play' || !isRestricted(state)) return;
+  notice.textContent = forbiddenCells(state).length === 0
+    ? '置ける場所がないので、どこにでも置けます'
+    : `自分の石の周りには置けません(あと${OPENING_TURNS - state.movesMade[state.turn]}ターン)`;
 }
 
-// 最初の石を順番に落とす(黒・白・黒・白)。待たない
+// 置けないマスをタップしたときの注意(次の renderGame で消える)。序盤にしか起きない
+export function showNotice(text) {
+  const notice = $('#notice');
+  notice.textContent = text;
+  notice.classList.add('alert');
+}
+
+// 最初の石を盤の並び順(DOM順)に落とす。待たない
 export function animateOpening() {
   document.querySelectorAll('#board .stone').forEach((stone, i) => {
     stone.classList.add('placed');

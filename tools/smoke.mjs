@@ -729,8 +729,8 @@ async function scenarios() {
     const forbidden = [...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx));
     return { black, white, isolated, expected, forbidden };
   })()`;
-  const startOpening = async () => {
-    await fillSetup({ name: 'くろ', m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
+  const startOpening = async (blackName = 'くろ') => {
+    await fillSetup({ name: blackName, m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
     await js(`(() => {
       const f = document.querySelector('#setup-form');
       f.start.value = '2026-03-01';
@@ -748,7 +748,10 @@ async function scenarios() {
     op1.forbidden.length > 0 && JSON.stringify(op1.forbidden) === JSON.stringify(op1.expected),
     `置けないマスが黒の石の周り8マスの空きマスと一致しません: ${JSON.stringify(op1)}`,
   );
-  check((await js(`document.querySelector('#turn-msg').textContent`)).includes('あと3ターン'), '開始直後の手番表示に「あと3ターン」がありません');
+  check((await js(`document.querySelector('#notice').textContent`)).includes('あと3ターン'), '開始直後の注意行に「あと3ターン」がありません');
+  check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと'), '開始直後の手番表示に「あと」が混ざっています');
+  const boardTop = `Math.round(document.querySelector('#board').getBoundingClientRect().top * 100) / 100`;
+  const topBefore = await js(boardTop);
   check(await noHorizontalScroll(), '開始直後の対戦画面(390px)が横にスクロールします');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await shot('phone-opening');
@@ -757,13 +760,21 @@ async function scenarios() {
   await tapCell(op1.forbidden[0]);
   await sleep(100);
   check(await stoneCount() === 4, '置けないマスをタップしたのに石が増えました');
-  check(await js(`document.querySelector('#notice').textContent`) === '自分の石の周りには置けません', '置けないマスをタップしても注意が出ません');
+  check(await js(`document.querySelector('#notice').textContent`).then((t) => t.includes('自分の石の周りには置けません')), '置けないマスをタップしても注意が出ません');
+  check(await js(`document.querySelector('#notice').classList.contains('alert')`), '置けないマスのタップで注意に alert が付いていません');
+  const topAfterTap = await js(boardTop);
+  check(topAfterTap === topBefore, `置けないマスのタップで盤が動きました: ${topBefore} → ${topAfterTap}`);
   // 1手目の演出中: 手番の文に制限の回数が混ざらない(「あと0ターン」や次の人の制限を出さない)
   const duringMove = await js(`(() => {
     const cell = document.querySelector('#board .cell:not(.has-stone):not(.forbidden)');
     cell.click();
-    return { msg: document.querySelector('#turn-msg').textContent, forbidden: document.querySelectorAll('#board .cell.forbidden').length };
+    return {
+      msg: document.querySelector('#turn-msg').textContent,
+      forbidden: document.querySelectorAll('#board .cell.forbidden').length,
+      top: Math.round(document.querySelector('#board').getBoundingClientRect().top * 100) / 100,
+    };
   })()`);
+  check(duringMove.top === topBefore, `1手目の演出中に盤が動きました: ${topBefore} → ${duringMove.top}`);
   check(duringMove.msg.startsWith('くろ(黒)の番です') && !duringMove.msg.includes('あと'), `手の演出中の手番の文が想定と違います: ${duringMove.msg}`);
   check(duringMove.forbidden === 0, `手の演出中に置けないマスの印が出ています: ${duringMove.forbidden}`);
   await settled();
@@ -775,6 +786,8 @@ async function scenarios() {
   }
   check(await js(`document.querySelectorAll('#board .cell.forbidden').length`) === 0, '6手のあとも置けないマスの印が残っています');
   check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと'), '6手のあとも手番表示に「あと」が残っています');
+  check(await js(`getComputedStyle(document.querySelector('#notice')).display`) === 'none', '6手のあとも注意行が表示されています');
+  check(!(await js(`document.querySelector('.status').classList.contains('opening')`)), '6手のあとも .status に opening が残っています');
   // 同じ seed なら最初の石は同じ
   await open(390, 844, 'seed=3');
   await startOpening();
@@ -785,7 +798,7 @@ async function scenarios() {
   );
   // 設定に戻って始め直す: 新しい配置に合った印、注意は空、あと3ターン
   await tapCell(op2.forbidden[0]);
-  check(await js(`document.querySelector('#notice').textContent`) !== '', '注意が出ていません(始め直しの確認の前提)');
+  check(await js(`document.querySelector('#notice').classList.contains('alert')`), '注意が出ていません(始め直しの確認の前提)');
   await js(`document.querySelector('[data-action="quit"]').click()`);
   await waitFor(`!document.querySelector('#setup').hidden`);
   await startFromSetup();
@@ -794,12 +807,18 @@ async function scenarios() {
     op3.forbidden.length > 0 && JSON.stringify(op3.forbidden) === JSON.stringify(op3.expected),
     `始め直した盤面で、置けないマスが配置と合っていません: ${JSON.stringify(op3)}`,
   );
-  check(await js(`document.querySelector('#notice').textContent`) === '', '始め直したあとも注意が残っています');
-  check((await js(`document.querySelector('#turn-msg').textContent`)).includes('あと3ターン'), '始め直したあとの手番表示に「あと3ターン」がありません');
-  // 幅320でも開始直後に横スクロールしない
+  check(!(await js(`document.querySelector('#notice').classList.contains('alert')`)), '始め直したあとも置けないマスの注意(alert)が残っています');
+  check((await js(`document.querySelector('#notice').textContent`)).includes('あと3ターン'), '始め直したあとの注意行に「あと3ターン」がありません');
+  // 幅320でも開始直後に横スクロールしない。名前が10文字でも、1手目の演出中に盤が動かない
   await open(320, 640, 'seed=3');
-  await startOpening();
+  await startOpening('あいうえおかきくけこ');
   check(await noHorizontalScroll(), '開始直後の対戦画面(320px)が横にスクロールします');
+  const top320 = await js(boardTop);
+  const during320 = await js(`(() => {
+    document.querySelector('#board .cell:not(.has-stone):not(.forbidden)').click();
+    return Math.round(document.querySelector('#board').getBoundingClientRect().top * 100) / 100;
+  })()`);
+  check(during320 === top320, `320px・名前10文字で1手目の演出中に盤が動きました: ${top320} → ${during320}`);
 
   // 25. 置けるマスがないとき(空きがすべて自分の石の周り)は、印を出さず「どこにでも置けます」と出す
   await open(390, 844);
@@ -822,10 +841,11 @@ async function scenarios() {
     return {
       forbidden: document.querySelectorAll('#board .cell.forbidden').length,
       msg: document.querySelector('#turn-msg').textContent,
+      notice: document.querySelector('#notice').textContent,
     };
   })()`);
   check(fallbackView.forbidden === 0, `置ける場所がないのに置けないマスの印が出ています: ${JSON.stringify(fallbackView)}`);
-  check(fallbackView.msg.includes('どこにでも置けます'), `フォールバックの手番表示が想定と違います: ${fallbackView.msg}`);
+  check(fallbackView.notice.includes('どこにでも置けます') && !fallbackView.msg.includes('あと'), `フォールバックの注意行が想定と違います: ${JSON.stringify(fallbackView)}`);
 
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();
