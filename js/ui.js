@@ -140,7 +140,8 @@ function turnMessage(state, pickIdx, turn, animating) {
   const who = `${player.name}(${COLOR_NAME[turn]})`;
   if (state.phase === 'choose') return `${who}: ${CHOICE_PROMPT[state.choice.effect]}`;
   if (pickIdx !== null) return `${who}: 調整を選んでください`;
-  if (isRestricted(state)) {
+  // 手の演出中は、次の手番の制限を出さない(打った人の名前と食い違うため)
+  if (!animating && isRestricted(state)) {
     if (forbiddenCells(state).length === 0) return `${who}の番です(置ける場所がないので、どこにでも置けます)`;
     return `${who}の番です(あと${OPENING_TURNS - state.movesMade[turn]}ターン: 自分の石の周りには置けません)`;
   }

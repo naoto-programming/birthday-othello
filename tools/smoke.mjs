@@ -266,8 +266,7 @@ async function scenarios() {
     const r = document.querySelector('#adjust-panel').getBoundingClientRect();
     return { top: r.top, bottom: r.bottom };
   })()`);
-  // 注意欄の高さが小数なので、丸めの分だけ1pxの余裕を持たせる
-  check(panelRect.top >= 0 && panelRect.bottom <= 553 + 1, `調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(panelRect)}`);
+  check(panelRect.top >= 0 && panelRect.bottom <= 553, `調整パネルが375x553の画面からはみ出しています: ${JSON.stringify(panelRect)}`);
   check(await js(`document.querySelectorAll('#adjust-panel .adjust-row button[data-adjust]').length`) === 7, '調整のボタンが7つではありません');
   check(await js(`document.querySelector('#adjust-panel [data-adjust="1"]').textContent`).then((t) => t.includes('勝ち')), '調整+1の文言に「勝ち」がありません');
   check(await js(`document.querySelector('#adjust-panel [data-adjust="2"]').textContent`).then((t) => t.includes('3マス')), '調整+2の文言に「3マス」がありません');
@@ -759,8 +758,18 @@ async function scenarios() {
   await sleep(100);
   check(await stoneCount() === 4, '置けないマスをタップしたのに石が増えました');
   check(await js(`document.querySelector('#notice').textContent`) === '自分の石の周りには置けません', '置けないマスをタップしても注意が出ません');
-  // 黒と白が交互に3手ずつ
-  for (let i = 0; i < 6; i++) {
+  // 1手目の演出中: 手番の文に制限の回数が混ざらない(「あと0ターン」や次の人の制限を出さない)
+  const duringMove = await js(`(() => {
+    const cell = document.querySelector('#board .cell:not(.has-stone):not(.forbidden)');
+    cell.click();
+    return { msg: document.querySelector('#turn-msg').textContent, forbidden: document.querySelectorAll('#board .cell.forbidden').length };
+  })()`);
+  check(duringMove.msg.startsWith('くろ(黒)の番です') && !duringMove.msg.includes('あと'), `手の演出中の手番の文が想定と違います: ${duringMove.msg}`);
+  check(duringMove.forbidden === 0, `手の演出中に置けないマスの印が出ています: ${duringMove.forbidden}`);
+  await settled();
+  check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと0'), '手番の文に「あと0ターン」が出ています');
+  // 黒と白が交互に3手ずつ(1手目は上で打った)
+  for (let i = 0; i < 5; i++) {
     const count = await stoneCount();
     await playUntil(`document.querySelectorAll('#board .stone').length > ${count}`);
   }
