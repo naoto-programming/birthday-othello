@@ -106,6 +106,7 @@ export function renderGame(state, {
   const turnMsg = $('#turn-msg');
   turnMsg.textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
   turnMsg.classList.remove('alert');
+  turnMsg.style.minHeight = ''; // showNotice が固定した高さを戻す
   renderStageBadge(state);
   renderBoard(state, shownP, pickIdx, shownWeights, turnOverride === null);
   renderAdjustPanel(state, pickIdx);
@@ -163,6 +164,8 @@ function renderOpeningLine(state, animating) {
 // 序盤(.status に opening)は注意行に出す。序盤のあとは注意行がないので、手番の文を注意に置き換える(盤が動かない)
 export function showNotice(text) {
   const notice = $('.status').classList.contains('opening') ? $('#notice') : $('#turn-msg');
+  // 手番の文が2行のとき、1行の注意に替わっても盤が動かないよう、今の高さを保つ(次の renderGame で戻す)
+  if (notice.id === 'turn-msg') notice.style.minHeight = `${notice.offsetHeight}px`;
   notice.textContent = text;
   notice.classList.add('alert');
 }
@@ -197,7 +200,7 @@ function renderBoard(state, shownP, pickIdx, shownWeights, showForbidden) {
   const [periodFrom, periodTo] = squarePeriod(shownP, match.D, match.N).map((offset) => match.baseDay + offset);
   const eventByDay = new Map(Object.values(state.events).map((ev) => [ev.day, ev]));
   const targets = new Set(state.phase === 'choose' ? choiceTargets(state) : []);
-  // 序盤で今の手番が置けないマス(演出中は出さない)
+  // 今の手番が置けないマス: 序盤の制限と、閉じた角(対戦中ずっと)。演出中は出さない
   const forbidden = new Set(showForbidden && state.phase === 'play' ? forbiddenCells(state) : []);
   const cells = boardDates(today, size * size).map((day, idx) => {
     const cell = document.createElement('button');

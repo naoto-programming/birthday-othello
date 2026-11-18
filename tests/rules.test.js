@@ -793,3 +793,23 @@ test('openingBoard: 角には置かない', () => {
     for (const corner of [0, 7, 56, 63]) assert.equal(board[corner], null, `seed ${seed}`);
   }
 });
+
+test('lockedCorners: 8×8 を埋めて 12×12 に広げた直後は四隅が閉じている', () => {
+  const board = Array(64).fill('B');
+  assert.deepEqual(lockedCorners(expandBoard(board, 2)), [0, 11, 132, 143]);
+});
+
+test('lockedCorners: 12×12 を埋めて 14×14 に広げた直後の角は開いている', () => {
+  const board = Array(144).fill('B');
+  assert.deepEqual(lockedCorners(expandBoard(board, 1)), []);
+});
+
+test('playMove: 12×12 を埋めて 14×14 に進むと角は置ける', () => {
+  const state = stateWith({ stage: 1 });
+  state.board = Array(144).fill('B');
+  state.board[0] = null;
+  const next = playMove(state, 0);
+  assert.equal(next.stage, 2);
+  const forbidden = forbiddenCells(next);
+  for (const corner of [0, 13, 182, 195]) assert.ok(!forbidden.includes(corner), `角 ${corner}`);
+});

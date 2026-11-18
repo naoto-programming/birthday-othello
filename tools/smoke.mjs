@@ -307,6 +307,26 @@ async function scenarios() {
   await playCell(20);
   check(await stoneCount() === 1, '中断後の新しい対戦で打てません');
 
+  // 9-4: 手番の文が2行のとき(幅320、名前6文字)に閉じた角をタップしても、注意に替わって盤が動かない
+  await js(`document.querySelector('[data-action="quit"]').click()`);
+  await open(320, 1400); // スクロールしない高さ(スクロールがあると盤の位置のずれを隠す)
+  await fillSetup({ name: 'おにいちゃん', m: 11, d: 1 }, { name: 'しろ', m: 11, d: 7 });
+  await opening();
+  await tapCell(25);
+  check(!(await panelHidden()), '9-4: 調整パネルが出ていません');
+  const topBeforeCorner = await js(boardTopExpr);
+  const msgHeight = await js(`document.querySelector('#turn-msg').offsetHeight`);
+  await tapCell(0);
+  const topAfterCorner = await js(boardTopExpr);
+  console.log(`board top (adjust prompt, corner tap): 320px ${topBeforeCorner} → ${topAfterCorner} (turn-msg ${msgHeight}px)`);
+  check(await js(`document.querySelector('#turn-msg').textContent`) === '角は、となりに石が置かれるまで置けません', '9-4: 角のタップで手番の文が注意になっていません');
+  check(await js(`document.querySelector('#turn-msg').classList.contains('alert')`), '9-4: 角の注意に alert が付いていません');
+  check(topAfterCorner === topBeforeCorner, `9-4: 調整の文から角の注意に替わって盤が動きました: ${topBeforeCorner} → ${topAfterCorner}`);
+  await js(`document.querySelector('#adjust-panel [data-cancel]').click()`);
+  check(!(await js(`document.querySelector('#turn-msg').classList.contains('alert')`)), '9-4: 次の描画で alert が外れていません');
+  check(await js(`document.querySelector('#turn-msg').style.minHeight`) === '', '9-4: 次の描画で min-height が戻っていません');
+  check((await js(`document.querySelector('#turn-msg').textContent`)) !== '角は、となりに石が置かれるまで置けません', '9-4: 次の描画で手番の文が戻っていません');
+
   // 10. 演出中に「設定に戻る」で中断し、演出が終わる前に新しい対戦を始めても上書きされない
   await open(400, 700);
   await fillSetup({ name: 'アニメ太郎', m: 3, d: 1 }, { name: 'アニメ花子', m: 9, d: 1 });
@@ -595,6 +615,8 @@ async function scenarios() {
     );
     check(await js(`document.querySelectorAll('#board .cell').length`) === 144, `サドンデスで盤面のマスが144ではありません: ${await js(`document.querySelectorAll('#board .cell').length`)}`);
     check(await js(`document.querySelector('#board').dataset.size`) === '12', 'サドンデスで #board の data-size が 12 ではありません');
+    const sdCorners = await js(`[...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx)).filter((i) => [0, 11, 132, 143].includes(i))`);
+    check(JSON.stringify(sdCorners) === JSON.stringify([0, 11, 132, 143]), `サドンデス直後の12×12の四隅が閉じていません: ${JSON.stringify(sdCorners)}`);
     check(await js(`!document.querySelector('#stage-badge').hidden && document.querySelector('#stage-badge').textContent === 'サドンデス'`), '札「サドンデス」が出ていません');
     check(await stoneCount() === 64, `サドンデスの石が64個ではありません: ${await stoneCount()}`);
     check(await js(`document.querySelector('#board .stone') !== null && [...document.querySelectorAll('#board .stone')].every((s) => s.textContent === '1')`), 'サドンデスに入ったとき石の重さがすべて1に戻っていません');
@@ -771,7 +793,13 @@ async function scenarios() {
   const topAfterTap = await js(boardTop);
   check(topAfterTap === topBefore, `置けないマスのタップで盤が動きました: ${topBefore} → ${topAfterTap}`);
   // 序盤の角のタップ: 注意は #notice に出て(alert)、手番の文は変わらず alert なし、盤は動かない
-  const cornerInOpening = op1.forbidden.find((i) => [0, 7, 56, 63].includes(i));
+  // 閉じた角(角が空でとなり3マスも空)だけから選ぶ。自分の石のとなりで斜線になった角だと、注意の文が変わる
+  const closedCorners = await js(`(() => {
+    const stoned = (i) => document.querySelector('#board .cell[data-idx="' + i + '"] .stone') !== null;
+    return [[0, 1, 8, 9], [7, 6, 15, 14], [56, 57, 48, 49], [63, 62, 55, 54]].filter((g) => g.every((i) => !stoned(i))).map((g) => g[0]);
+  })()`);
+  check(closedCorners.length > 0, `序盤の盤に閉じた角がありません: ${JSON.stringify(closedCorners)}`);
+  const cornerInOpening = closedCorners[0];
   check(cornerInOpening !== undefined, `序盤の盤に閉じた角の印がありません: ${JSON.stringify(op1.forbidden)}`);
   if (cornerInOpening !== undefined) {
     const msgBefore = await js(`document.querySelector('#turn-msg').textContent`);

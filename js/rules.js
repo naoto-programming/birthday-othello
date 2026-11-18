@@ -73,7 +73,7 @@ export function seededRandom(seed) {
   };
 }
 
-// 最初の石の盤面: 黒・白・黒・白の順に1個ずつ。すでに置いた石の周り8マスには置かない。
+// 最初の石の盤面: 黒・白・黒・白の順に1個ずつ。すでに置いた石の周り8マスと、四隅には置かない。
 export function openingBoard(random) {
   const board = Array(SIZE * SIZE).fill(null);
   const placed = [];
