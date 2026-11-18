@@ -67,7 +67,7 @@ button { font: inherit; cursor: pointer; }
 .pl-left { font-weight: bold; }
 .pl-effects { color: var(--accent); font-size: 0.8rem; }
 .turn-msg { text-align: center; margin: 8px 0 0; font-weight: bold; min-height: 1.5em; }
-.turn-msg.alert { color: var(--accent); }
+.turn-msg.alert { color: var(--accent); font-size: 0.85rem; line-height: 1.5rem; min-height: 1.5rem; } /* 幅320でも1行に収め、盤が動かないようにする */
 
 .board-wrap { position: relative; }
 .board {

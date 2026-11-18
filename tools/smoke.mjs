@@ -770,6 +770,20 @@ async function scenarios() {
   check(await js(`document.querySelector('#notice').classList.contains('alert')`), '置けないマスのタップで注意に alert が付いていません');
   const topAfterTap = await js(boardTop);
   check(topAfterTap === topBefore, `置けないマスのタップで盤が動きました: ${topBefore} → ${topAfterTap}`);
+  // 序盤の角のタップ: 注意は #notice に出て(alert)、手番の文は変わらず alert なし、盤は動かない
+  const cornerInOpening = op1.forbidden.find((i) => [0, 7, 56, 63].includes(i));
+  check(cornerInOpening !== undefined, `序盤の盤に閉じた角の印がありません: ${JSON.stringify(op1.forbidden)}`);
+  if (cornerInOpening !== undefined) {
+    const msgBefore = await js(`document.querySelector('#turn-msg').textContent`);
+    await tapCell(cornerInOpening);
+    check(await stoneCount() === 4, '序盤に閉じた角をタップしたのに石が増えました');
+    check(await js(`document.querySelector('#notice').textContent`) === '角は、となりに石が置かれるまで置けません', '序盤の角のタップで注意行の文が想定と違います');
+    check(await js(`document.querySelector('#notice').classList.contains('alert')`), '序盤の角のタップで注意行に alert が付いていません');
+    check(await js(`document.querySelector('#turn-msg').textContent`) === msgBefore, '序盤の角のタップで手番の文が変わりました');
+    check(!(await js(`document.querySelector('#turn-msg').classList.contains('alert')`)), '序盤の角のタップで手番の文に alert が付いています');
+    const topAfterCorner = await js(boardTop);
+    check(topAfterCorner === topBefore, `序盤の角のタップで盤が動きました: ${topBefore} → ${topAfterCorner}`);
+  }
   // 1手目の演出中: 手番の文に制限の回数が混ざらない(「あと0ターン」や次の人の制限を出さない)
   const duringMove = await js(`(() => {
     const cell = document.querySelector('#board .cell:not(.has-stone):not(.forbidden)');
@@ -862,6 +876,21 @@ async function scenarios() {
   check(fallbackView.notice.includes('どこにでも置けます') && !fallbackView.msg.includes('あと'), `フォールバックの注意行が想定と違います: ${JSON.stringify(fallbackView)}`);
 
   // 26. 閉じた角: 四隅に斜線、タップすると手番の文が注意になり(盤は動かない)、となりに石が置かれると開く
+  // まず幅320(注意の文が1行に収まらないと盤が動く)
+  await open(320, 640);
+  await fillSetup({ name: 'くろ', m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
+  await js(`(() => {
+    const f = document.querySelector('#setup-form');
+    f.start.value = '2026-03-01';
+    f.start.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await startFromSetup();
+  const top320Before = await js(boardTopExpr);
+  await tapCell(0);
+  const top320After = await js(boardTopExpr);
+  console.log(`board top (corner tap): 320px ${top320Before} → ${top320After}`);
+  check(await js(`document.querySelector('#turn-msg').classList.contains('alert')`), '幅320: 閉じた角の注意に alert が付いていません');
+  check(top320After === top320Before, `幅320で閉じた角のタップで盤が動きました: ${top320Before} → ${top320After}`);
   await open(390, 844);
   await fillSetup({ name: 'くろ', m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
   await js(`(() => {
@@ -878,6 +907,7 @@ async function scenarios() {
   check(await js(`document.querySelector('#turn-msg').textContent`) === '角は、となりに石が置かれるまで置けません', '閉じた角のタップで手番の文が注意になっていません');
   check(await js(`document.querySelector('#turn-msg').classList.contains('alert')`), '閉じた角の注意に alert が付いていません');
   const cornerTopAfter = await js(boardTopExpr);
+  console.log(`board top (corner tap): 390px ${cornerTop} → ${cornerTopAfter}`);
   check(cornerTopAfter === cornerTop, `閉じた角のタップで盤が動きました: ${cornerTop} → ${cornerTopAfter}`);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await shot('phone-corners');
