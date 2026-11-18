@@ -83,6 +83,7 @@ export function openingBoard(random) {
       if (board[idx]) continue;
       const r = Math.floor(idx / SIZE);
       const c = idx % SIZE;
+      if (idx === 0 || idx === SIZE - 1 || idx === SIZE * (SIZE - 1) || idx === SIZE * SIZE - 1) continue;
       if (placed.every((q) => Math.abs(Math.floor(q / SIZE) - r) > 1 || Math.abs((q % SIZE) - c) > 1)) candidates.push(idx);
     }
     const idx = candidates[Math.floor(random() * candidates.length)];
@@ -156,30 +157,49 @@ export function isRestricted(state, color = state.turn) {
   return Boolean(state.opening) && state.movesMade[color] < OPENING_TURNS;
 }
 
-// この手で置けない空きマス(小さい順)。制限中は color の石の周り8マス。空きマスがすべて該当するなら [](どこにでも置ける)。
-export function forbiddenCells(state, color = state.turn) {
-  if (!isRestricted(state, color)) return [];
-  const { board } = state;
+// 四隅のうち、空いていて、隣り合う3マスもすべて空いているもの(小さい順)。閉じた角には置けない。
+export function lockedCorners(board) {
   const side = sideOf(board);
-  const cells = [];
-  let empties = 0;
-  board.forEach((stone, idx) => {
-    if (stone) return;
-    empties += 1;
+  const corners = [0, side - 1, side * (side - 1), side * side - 1];
+  return corners.filter((idx) => {
+    if (board[idx]) return false;
     const r = Math.floor(idx / side);
     const c = idx % side;
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
-        const rr = r + dr;
-        const cc = c + dc;
-        if ((dr || dc) && rr >= 0 && rr < side && cc >= 0 && cc < side && board[rr * side + cc]?.color === color) {
-          cells.push(idx);
-          return;
+    const dr = r === 0 ? 1 : -1;
+    const dc = c === 0 ? 1 : -1;
+    return !board[r * side + c + dc] && !board[(r + dr) * side + c] && !board[(r + dr) * side + c + dc];
+  });
+}
+
+export function isLockedCorner(board, idx) {
+  return lockedCorners(board).includes(idx);
+}
+
+// この手で置けない空きマス(小さい順)。序盤の制限中は color の石の周り8マス、それに閉じた角。
+// 空きマスがすべて該当するなら [](どこにでも置ける)。
+export function forbiddenCells(state, color = state.turn) {
+  const { board } = state;
+  const side = sideOf(board);
+  const forbidden = new Set(lockedCorners(board));
+  if (isRestricted(state, color)) {
+    board.forEach((stone, idx) => {
+      if (stone) return;
+      const r = Math.floor(idx / side);
+      const c = idx % side;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr;
+          const cc = c + dc;
+          if ((dr || dc) && rr >= 0 && rr < side && cc >= 0 && cc < side && board[rr * side + cc]?.color === color) {
+            forbidden.add(idx);
+            return;
+          }
         }
       }
-    }
-  });
-  return cells.length === empties ? [] : cells;
+    });
+  }
+  const empties = board.filter((stone) => !stone).length;
+  return forbidden.size === empties ? [] : [...forbidden].sort((x, y) => x - y);
 }
 
 // 空きマスで、この手で置けるか
@@ -354,9 +374,10 @@ export function choiceTargets(state) {
   if (!state.choice) return [];
   const { effect, player } = state.choice;
   const targets = [];
+  const locked = effect === 'plant' ? lockedCorners(state.board) : [];
   state.board.forEach((stone, idx) => {
     let ok;
-    if (effect === 'plant') ok = !stone;
+    if (effect === 'plant') ok = !stone && !locked.includes(idx);
     else if (effect === 'fix') ok = stone && stone.color === player && !stone.fixed;
     else ok = stone && stone.color === opponent(player) && !stone.fixed;
     if (ok) targets.push(idx);

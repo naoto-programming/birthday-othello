@@ -4,7 +4,7 @@ import { dayNum } from '../js/dates.js';
 import {
   reflect, stoneWeight, newGame, flipLines, computeFlips, canFlipAnywhere, previewMove, moveDays, playMove,
   countStones, judgeFull, choiceTargets, applyChoice, sideOf, expandBoard, cropBoard,
-  seededRandom, openingBoard, forbiddenCells, isRestricted, canPlace,
+  seededRandom, openingBoard, forbiddenCells, isRestricted, canPlace, lockedCorners, isLockedCorner,
 } from '../js/rules.js';
 
 const at = (r, c) => r * 8 + c;
@@ -305,7 +305,7 @@ test('playMove: 返さない手の代償は効果に関係なく1マスで、効
   const st = stateWith({ p: 10, rows: rowsWith('.WB.....') });
   st.pending.B.double = true;
   st.pending.B.rest = true;
-  const next = playMove(st, at(7, 7));
+  const next = playMove(st, at(7, 6));
   assert.equal(next.p, 11);
   assert.equal(next.lastMove.stall, true);
   assert.equal(next.pending.B.double, false);
@@ -316,7 +316,7 @@ test('playMove: 返さない手の代償は効果に関係なく1マスで、効
 test('playMove: 挟める手がどこにもなければ日付は動かず、イベントも起きない', () => {
   const st = stateWith({ p: 10, events: { 10: ev('plus3') } });
   st.pending.B.plus3 = true;
-  const next = playMove(st, at(0, 0));
+  const next = playMove(st, at(3, 3));
   assert.equal(next.p, 10);
   assert.equal(next.lastMove.stall, false);
   assert.equal(next.lastMove.event, null);
@@ -330,12 +330,12 @@ test('playMove: 誕生日が2日差でも1手目で決着しない', () => {
 });
 
 test('playMove: 代償で相手の誕生日に止まると相手の勝ち', () => {
-  const next = playMove(stateWith({ N: 20, p: 19, rows: rowsWith('.WB.....') }), at(7, 7));
+  const next = playMove(stateWith({ N: 20, p: 19, rows: rowsWith('.WB.....') }), at(7, 6));
   assert.deepEqual(next.result, { winner: 'W', reason: 'birthday' });
 });
 
 test('playMove: 代償でもイベントのマスに止まれば発動する', () => {
-  const next = playMove(stateWith({ p: 10, rows: rowsWith('.WB.....'), events: { 11: ev('plus3') } }), at(7, 7));
+  const next = playMove(stateWith({ p: 10, rows: rowsWith('.WB.....'), events: { 11: ev('plus3') } }), at(7, 6));
   assert.equal(next.lastMove.event.effect, 'plus3');
   assert.equal(next.pending.B.plus3, true);
 });
@@ -485,9 +485,9 @@ test('イベント: 奪うは相手の石を自分の色にし、重さは変わ
 
 test('イベント: 植えるは空きマスに自分の石を置く', () => {
   const mid = playMove(stateWith({ p: 10, rows: CENTER4, events: { 9: ev('plant') } }), at(2, 3));
-  assert.equal(choiceTargets(mid).length, 59);
-  const next = applyChoice(mid, at(0, 0));
-  assert.deepEqual(next.board[at(0, 0)], { color: 'B', flips: 0, fixed: false });
+  assert.equal(choiceTargets(mid).length, 55);
+  const next = applyChoice(mid, at(0, 1));
+  assert.deepEqual(next.board[at(0, 1)], { color: 'B', flips: 0, fixed: false });
 });
 
 test('イベント: 選べる対象がなければ不発で、次の手番へ進む', () => {
@@ -530,7 +530,7 @@ test('段階1: ぴったり届いても勝ち(exact)', () => {
 });
 
 test('段階1: 相手の手(様子見の代償)で通り越しても誕生日の人の勝ち', () => {
-  const next = playMove(stateWith({ stage: 1, p: 1, turn: 'W', rows: rowsWith('.BW.....') }), at(7, 7));
+  const next = playMove(stateWith({ stage: 1, p: 1, turn: 'W', rows: rowsWith('.BW.....') }), at(7, 6));
   assert.equal(next.lastMove.stall, true);
   assert.equal(next.result.winner, 'B');
   assert.equal(next.result.reason, 'pass');
@@ -545,7 +545,7 @@ test('段階2: 移動は最後に2倍(+3 のあと)', () => {
 });
 
 test('段階2: 様子見の代償も2倍', () => {
-  const next = playMove(stateWith({ stage: 2, p: 10, rows: rowsWith('.WB.....') }), at(7, 7));
+  const next = playMove(stateWith({ stage: 2, p: 10, rows: rowsWith('.WB.....') }), at(7, 6));
   assert.equal(next.lastMove.stall, true);
   assert.equal(next.lastMove.days, 2);
   assert.equal(next.p, 12);
@@ -564,8 +564,8 @@ test('段階2: 14マスの盤面で長い列を返し、2倍で通り越して�
 
 test('段階2: 様子見の代償がちょうど端に届いても勝ち', () => {
   const state = stateWith({ stage: 2, N: 20, p: 2, turn: 'W', rows: rowsWith('.BW.....') });
-  assert.equal(previewMove(state, at(7, 7)).raw, 0);
-  const next = playMove(state, at(7, 7));
+  assert.equal(previewMove(state, at(7, 6)).raw, 0);
+  const next = playMove(state, at(7, 6));
   assert.equal(next.lastMove.stall, true);
   assert.equal(next.lastMove.days, 2);
   assert.deepEqual(next.result, { winner: 'B', reason: 'pass', exact: true });
@@ -681,7 +681,8 @@ test('newGame: 既定では空の盤面で、制限もない', () => {
   const state = newGame(testMatch());
   assert.equal(state.board.filter(Boolean).length, 0);
   assert.equal(state.opening, false);
-  assert.deepEqual(forbiddenCells(state), []);
+  assert.deepEqual(forbiddenCells(state), [0, 7, 56, 63]);
+  assert.equal(isRestricted(state), false);
 });
 
 test('newGame: opening のとき最初の石があり、手の数は0から', () => {
@@ -692,7 +693,8 @@ test('newGame: opening のとき最初の石があり、手の数は0から', ()
 
 test('forbiddenCells: 最初の3手は自分の石の周りに置けない', () => {
   const state = openingState({ rows: rowsWith('...B.W..') });
-  assert.deepEqual(forbiddenCells(state), [at(2, 2), at(2, 3), at(2, 4), at(3, 2), at(3, 4), at(4, 2), at(4, 3), at(4, 4)]);
+  const corners = [0, 7, 56, 63];
+  assert.deepEqual(forbiddenCells(state).filter((i) => !corners.includes(i)), [at(2, 2), at(2, 3), at(2, 4), at(3, 2), at(3, 4), at(4, 2), at(4, 3), at(4, 4)]);
   assert.equal(isRestricted(state), true);
   assert.equal(canPlace(state, at(3, 4)), false);
   assert.equal(canPlace(state, at(3, 6)), true);
@@ -702,7 +704,7 @@ test('forbiddenCells: 最初の3手は自分の石の周りに置けない', () 
 test('forbiddenCells: 4手目からは制限がない', () => {
   const state = openingState({ rows: rowsWith('...B.W..') });
   state.movesMade.B = 3;
-  assert.deepEqual(forbiddenCells(state), []);
+  assert.deepEqual(forbiddenCells(state), [0, 7, 56, 63]);
   assert.equal(isRestricted(state), false);
   assert.equal(canPlace(state, at(2, 2)), true);
 });
@@ -720,7 +722,7 @@ test('playMove: 打つと手の数が増え、効果では増えない', () => {
   assert.equal(mid.p, 9);
   assert.equal(mid.phase, 'choose');
   assert.deepEqual(mid.movesMade, { B: 1, W: 0 });
-  const done = applyChoice(mid, at(7, 7));
+  const done = applyChoice(mid, at(7, 6));
   assert.equal(done.movesMade.B, 1);
 });
 
@@ -729,7 +731,7 @@ test('playMove: もう一手で続けて打つ手も1手と数える', () => {
   const first = playMove(state, at(3, 0));
   assert.equal(first.turn, 'B');
   assert.equal(first.movesMade.B, 1);
-  const second = playMove(first, at(7, 7));
+  const second = playMove(first, at(7, 6));
   assert.equal(second.movesMade.B, 2);
 });
 
@@ -737,12 +739,12 @@ const CLAMP_ROWS = ['........', '..B.....', '..W.....', '........', '..B.....', 
 
 test('previewMove: 置けないマスでしか挟めなければ代償はない', () => {
   const state = openingState({ p: 10, rows: CLAMP_ROWS });
-  const pv = previewMove(state, at(7, 7));
+  const pv = previewMove(state, at(7, 6));
   assert.equal(pv.stall, false);
   assert.equal(pv.days, 0);
   assert.equal(pv.toP, 10);
   state.opening = false;
-  const pv2 = previewMove(state, at(7, 7));
+  const pv2 = previewMove(state, at(7, 6));
   assert.equal(pv2.stall, true);
   assert.equal(pv2.toP, 11);
 });
@@ -751,4 +753,43 @@ test('canFlipAnywhere: forbidden のマスは調べない', () => {
   const board = boardFrom(CLAMP_ROWS);
   assert.equal(canFlipAnywhere(board, 'B'), true);
   assert.equal(canFlipAnywhere(board, 'B', [at(3, 2)]), false);
+});
+
+test('lockedCorners: 空の盤面では四隅すべて', () => {
+  assert.deepEqual(lockedCorners(Array(64).fill(null)), [0, 7, 56, 63]);
+  assert.equal(isLockedCorner(Array(64).fill(null), 0), true);
+  assert.equal(isLockedCorner(Array(64).fill(null), 1), false);
+});
+
+test('lockedCorners: 隣の3マスのどれかに石があれば開く', () => {
+  const board = Array(64).fill(null);
+  board[at(0, 1)] = { color: 'W', flips: 0, fixed: false };
+  board[at(6, 6)] = { color: 'B', flips: 0, fixed: false };
+  assert.deepEqual(lockedCorners(board), [7, 56]);
+});
+
+test('forbiddenCells: 序盤でなくても閉じた角は置けない', () => {
+  const state = stateWith();
+  assert.deepEqual(forbiddenCells(state), [0, 7, 56, 63]);
+  assert.equal(canPlace(state, 0), false);
+  assert.equal(playMove(state, 0), state);
+  assert.equal(canPlace(state, 1), true);
+});
+
+test('forbiddenCells: 12×12 の角も同じ', () => {
+  const state = stateWith({ stage: 1 });
+  state.board = Array(144).fill(null);
+  assert.deepEqual(forbiddenCells(state), [0, 11, 132, 143]);
+});
+
+test('forbiddenCells: 序盤の制限と閉じた角を合わせる', () => {
+  const state = openingState({ rows: rowsWith('...B.W..') });
+  assert.deepEqual(forbiddenCells(state), [0, 7, at(2, 2), at(2, 3), at(2, 4), at(3, 2), at(3, 4), at(4, 2), at(4, 3), at(4, 4), 56, 63]);
+});
+
+test('openingBoard: 角には置かない', () => {
+  for (let seed = 1; seed <= 200; seed++) {
+    const board = openingBoard(seededRandom(seed));
+    for (const corner of [0, 7, 56, 63]) assert.equal(board[corner], null, `seed ${seed}`);
+  }
 });
