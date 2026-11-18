@@ -1,5 +1,5 @@
 import { dayNum, defaultStart, fromDayNum, parseISODate, setupMatch, toISODate } from './dates.js';
-import { applyChoice, canPlace, cropBoard, newGame, playMove, previewMove, seededRandom, sideOf } from './rules.js';
+import { applyChoice, canPlace, cropBoard, isLockedCorner, newGame, playMove, previewMove, seededRandom, sideOf } from './rules.js';
 import {
   animateChoice, animateExpand, animateMove, animateOpening, animateWarp, celebrate, fillDaySelect, fillMonthSelect, fillRulesEventList,
   highlightEffect, renderGame, renderSetupPreview, revealAdjustPanel, showEventDialog, showNotice, showResult, showRules, showStageDialog,
@@ -176,7 +176,7 @@ async function tapCell(idx) {
   }
   if (state.phase !== 'play' || state.board[idx]) return;
   if (!canPlace(state, idx)) {
-    showNotice('自分の石の周りには置けません');
+    showNotice(isLockedCorner(state.board, idx) ? '角は、となりに石が置かれるまで置けません' : '自分の石の周りには置けません');
     return;
   }
   pickIdx = null;

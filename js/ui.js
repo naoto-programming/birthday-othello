@@ -103,7 +103,9 @@ export function renderGame(state, {
   $('#square-size').textContent = state.match.k > 1 ? squareLabel(state.match) : '';
   renderPlayerStatus($('#status-black'), state, 'B', shownP, turn, turnOverride !== null);
   renderPlayerStatus($('#status-white'), state, 'W', shownP, turn, turnOverride !== null);
-  $('#turn-msg').textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
+  const turnMsg = $('#turn-msg');
+  turnMsg.textContent = turnMessage(state, pickIdx, turn, turnOverride !== null);
+  turnMsg.classList.remove('alert');
   renderStageBadge(state);
   renderBoard(state, shownP, pickIdx, shownWeights, turnOverride === null);
   renderAdjustPanel(state, pickIdx);
@@ -157,9 +159,10 @@ function renderOpeningLine(state, animating) {
     : `自分の石の周りには置けません(あと${OPENING_TURNS - state.movesMade[state.turn]}ターン)`;
 }
 
-// 置けないマスをタップしたときの注意(次の renderGame で消える)。序盤にしか起きない
+// 置けないマスをタップしたときの注意(次の renderGame で消える)。
+// 序盤(.status に opening)は注意行に出す。序盤のあとは注意行がないので、手番の文を注意に置き換える(盤が動かない)
 export function showNotice(text) {
-  const notice = $('#notice');
+  const notice = $('.status').classList.contains('opening') ? $('#notice') : $('#turn-msg');
   notice.textContent = text;
   notice.classList.add('alert');
 }

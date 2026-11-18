@@ -91,6 +91,7 @@ console.log(`OK: スクリーンショットを ${fileURLToPath(OUT)} に保存�
 // ---- シナリオ ----
 
 async function scenarios() {
+  const boardTopExpr = `Math.round(document.querySelector('#board').getBoundingClientRect().top * 100) / 100`;
   // 1. スマホ幅: 設定 → 空の盤面 → マスをタップして置く、序盤の3手
   await open(390, 844);
   await fillSetup({ name: 'たろう', m: 10, d: 14 }, { name: 'はなこ', m: 12, d: 3 });
@@ -565,12 +566,12 @@ async function scenarios() {
   check(manyMonthsMs < 2600, `1マスが何日分もある対戦で、日付の演出が長すぎます: ${manyMonthsMs}ms`);
 
   // 20. 本物の画面で段階1(サドンデス)へ。
-  // 1/1 と 1/10、開始 2026-09-01(黒は 1/10 の人、D=356、N=30)。playToEnd() と同じ打ち方(最初の空きマス、
-  // 選ぶ効果は最初の候補、調整は0)をしても、段階0では誕生日で決着せず、65手目あたりで盤面が埋まって段階1へ進む。
+  // 1/1 と 8/10、開始 2026-09-01(黒は 8/10 の人、D=144、N=29)。v5 の角の規則で打つ順が変わり、1/1 と 1/10 では段階1に着かなくなったので組を探し直した。playToEnd() と同じ打ち方(最初の空きマス、
+  // 選ぶ効果は最初の候補、調整は0)をしても、段階0では誕生日で決着せず、64手目あたりで盤面が埋まって段階1へ進む。
   // 探し方: 誕生日と開始日の組を総当たりし、Node で js/rules.js をその打ち方で動かして、段階1に着く組を選んだ(同じ誕生日の組は黒白がランダムなので除く)。
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await open(390, 844);
-  await fillSetup({ name: 'いち', m: 1, d: 1 }, { name: 'じゅう', m: 1, d: 10 });
+  await fillSetup({ name: 'いち', m: 1, d: 1 }, { name: 'じゅう', m: 8, d: 10 });
   await js(`(() => {
     const f = document.querySelector('#setup-form');
     f.start.value = '2026-09-01';
@@ -725,7 +726,12 @@ async function scenarios() {
     const all = [...black, ...white];
     const isolated = all.every((a) => all.every((b) => a === b || Math.abs(Math.floor(a / 8) - Math.floor(b / 8)) > 1 || Math.abs((a % 8) - (b % 8)) > 1));
     const near = (i) => black.some((b) => Math.abs(Math.floor(b / 8) - Math.floor(i / 8)) <= 1 && Math.abs((b % 8) - (i % 8)) <= 1);
-    const expected = [...document.querySelectorAll('#board .cell:not(.has-stone)')].map((c) => Number(c.dataset.idx)).filter(near);
+    // 閉じた角: 空きの角で、となりの3マスがすべて空き
+    const occupied = new Set(all);
+    const closedCorners = [[0, [1, 8, 9]], [7, [6, 14, 15]], [56, [48, 49, 57]], [63, [54, 55, 62]]]
+      .filter(([c, ns]) => !occupied.has(c) && ns.every((n) => !occupied.has(n))).map(([c]) => c);
+    const expected = [...document.querySelectorAll('#board .cell:not(.has-stone)')].map((c) => Number(c.dataset.idx))
+      .filter((i) => near(i) || closedCorners.includes(i));
     const forbidden = [...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx));
     return { black, white, isolated, expected, forbidden };
   })()`;
@@ -750,14 +756,14 @@ async function scenarios() {
   );
   check((await js(`document.querySelector('#notice').textContent`)).includes('あと3ターン'), '開始直後の注意行に「あと3ターン」がありません');
   check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと'), '開始直後の手番表示に「あと」が混ざっています');
-  const boardTop = `Math.round(document.querySelector('#board').getBoundingClientRect().top * 100) / 100`;
+  const boardTop = boardTopExpr;
   const topBefore = await js(boardTop);
   check(await noHorizontalScroll(), '開始直後の対戦画面(390px)が横にスクロールします');
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await shot('phone-opening');
   await send('Emulation.setEmulatedMedia', { features: [] });
   // 置けないマスをタップ: 石は増えず、注意が出る
-  await tapCell(op1.forbidden[0]);
+  await tapCell(op1.forbidden.find((i) => ![0, 7, 56, 63].includes(i)));
   await sleep(100);
   check(await stoneCount() === 4, '置けないマスをタップしたのに石が増えました');
   check(await js(`document.querySelector('#notice').textContent`).then((t) => t.includes('自分の石の周りには置けません')), '置けないマスをタップしても注意が出ません');
@@ -784,7 +790,15 @@ async function scenarios() {
     const count = await stoneCount();
     await playUntil(`document.querySelectorAll('#board .stone').length > ${count}`);
   }
-  check(await js(`document.querySelectorAll('#board .cell.forbidden').length`) === 0, '6手のあとも置けないマスの印が残っています');
+  // 6手のあとは序盤の制限だけが消え、閉じた角の印は残る
+  const afterOpening = await js(`(() => {
+    const occ = (i) => document.querySelector('#board .cell[data-idx="' + i + '"]').classList.contains('has-stone');
+    const closed = [[0, [1, 8, 9]], [7, [6, 14, 15]], [56, [48, 49, 57]], [63, [54, 55, 62]]]
+      .filter(([c, ns]) => !occ(c) && ns.every((n) => !occ(n))).map(([c]) => c);
+    const forbidden = [...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx));
+    return { closed, forbidden };
+  })()`);
+  check(JSON.stringify(afterOpening.forbidden) === JSON.stringify(afterOpening.closed), `6手のあと、置けないマスの印が閉じた角だけではありません: ${JSON.stringify(afterOpening)}`);
   check(!(await js(`document.querySelector('#turn-msg').textContent`)).includes('あと'), '6手のあとも手番表示に「あと」が残っています');
   check(await js(`getComputedStyle(document.querySelector('#notice')).display`) === 'none', '6手のあとも注意行が表示されています');
   check(!(await js(`document.querySelector('.status').classList.contains('opening')`)), '6手のあとも .status に opening が残っています');
@@ -797,7 +811,7 @@ async function scenarios() {
     `同じ seed なのに最初の石が違います: ${JSON.stringify([op1.black, op1.white])} / ${JSON.stringify([op2.black, op2.white])}`,
   );
   // 設定に戻って始め直す: 新しい配置に合った印、注意は空、あと3ターン
-  await tapCell(op2.forbidden[0]);
+  await tapCell(op2.forbidden.find((i) => ![0, 7, 56, 63].includes(i)));
   check(await js(`document.querySelector('#notice').classList.contains('alert')`), '注意が出ていません(始め直しの確認の前提)');
   await js(`document.querySelector('[data-action="quit"]').click()`);
   await waitFor(`!document.querySelector('#setup').hidden`);
@@ -846,6 +860,34 @@ async function scenarios() {
   })()`);
   check(fallbackView.forbidden === 0, `置ける場所がないのに置けないマスの印が出ています: ${JSON.stringify(fallbackView)}`);
   check(fallbackView.notice.includes('どこにでも置けます') && !fallbackView.msg.includes('あと'), `フォールバックの注意行が想定と違います: ${JSON.stringify(fallbackView)}`);
+
+  // 26. 閉じた角: 四隅に斜線、タップすると手番の文が注意になり(盤は動かない)、となりに石が置かれると開く
+  await open(390, 844);
+  await fillSetup({ name: 'くろ', m: 1, d: 1 }, { name: 'しろ', m: 7, d: 1 });
+  await js(`(() => {
+    const f = document.querySelector('#setup-form');
+    f.start.value = '2026-03-01';
+    f.start.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  await startFromSetup();
+  const forbiddenNow = () => js(`[...document.querySelectorAll('#board .cell.forbidden')].map((c) => Number(c.dataset.idx))`);
+  check(JSON.stringify(await forbiddenNow()) === JSON.stringify([0, 7, 56, 63]), `四隅だけに置けない印がありません: ${JSON.stringify(await forbiddenNow())}`);
+  const cornerTop = await js(boardTopExpr);
+  await tapCell(0);
+  check(await stoneCount() === 0, '閉じた角をタップしたのに石が置かれました');
+  check(await js(`document.querySelector('#turn-msg').textContent`) === '角は、となりに石が置かれるまで置けません', '閉じた角のタップで手番の文が注意になっていません');
+  check(await js(`document.querySelector('#turn-msg').classList.contains('alert')`), '閉じた角の注意に alert が付いていません');
+  const cornerTopAfter = await js(boardTopExpr);
+  check(cornerTopAfter === cornerTop, `閉じた角のタップで盤が動きました: ${cornerTop} → ${cornerTopAfter}`);
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await shot('phone-corners');
+  await send('Emulation.setEmulatedMedia', { features: [] });
+  await playCell(1);
+  check(!(await forbiddenNow()).includes(0), '1に石が置かれても角0の印が消えません');
+  check(!(await js(`document.querySelector('#turn-msg').classList.contains('alert')`)), '手を打ったあとも手番の文に alert が残っています');
+  check((await js(`document.querySelector('#turn-msg').textContent`)).includes('の番です'), '手を打ったあとの手番の文が通常の文ではありません');
+  await playCell(0);
+  check(await stoneCount() === 2, '角0が開いたのに白が置けません');
 
   // 12. 開発サーバーが壊れたURLでも落ちずに400を返す
   await checkServerRobustness();

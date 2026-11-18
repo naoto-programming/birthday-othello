@@ -4,7 +4,7 @@
 1台のPCまたはスマートフォンを2人で交代に操作して遊びます。
 
 - 遊ぶ: https://naoto-programming.github.io/birthday-othello/
-- ルールと設計: `docs/superpowers/specs/2026-11-16-birthday-othello-v4-opening-design.md`(土台: v3 `docs/superpowers/specs/2026-11-11-birthday-othello-v3-design.md`、v2 `docs/superpowers/specs/2026-11-07-birthday-othello-v2-design.md`、v1 `docs/superpowers/specs/2026-10-29-birthday-othello-design.md`。新しい版で書いていない点は前の版のまま)
+- ルールと設計: `docs/superpowers/specs/2026-11-18-birthday-othello-v5-corners-design.md`(土台: v4 `docs/superpowers/specs/2026-11-16-birthday-othello-v4-opening-design.md`、v3 `docs/superpowers/specs/2026-11-11-birthday-othello-v3-design.md`、v2 `docs/superpowers/specs/2026-11-07-birthday-othello-v2-design.md`、v1 `docs/superpowers/specs/2026-10-29-birthday-othello-design.md`。新しい版で書いていない点は前の版のまま)
 
 ## 開発
 
