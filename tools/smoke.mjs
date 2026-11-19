@@ -771,8 +771,9 @@ async function scenarios() {
   const op1 = await js(openingPlacement);
   check(op1.black.length === 2 && op1.white.length === 2, `最初の石が黒2・白2ではありません: ${JSON.stringify(op1)}`);
   check(op1.isolated, `最初の石の周り8マスに別の石があります: ${JSON.stringify(op1)}`);
-  // 最初の石は四隅から2マス以上離れるので、開始時は四隅すべてが閉じている
+  // 最初の石は角・角のとなり・角から斜めに2つ目に来ないので、開始時は四隅すべてが閉じている
   check(JSON.stringify(op1.closedCorners) === '[0,7,56,63]', `開始時に閉じていない角があります(最初の石が角の近くにあります): ${JSON.stringify(op1)}`);
+  check(![18, 21, 42, 45].some((i) => [...op1.black, ...op1.white].includes(i)), `最初の石が角から斜めに2つ目のマスにあります: ${JSON.stringify(op1)}`);
   check(await js(`document.querySelectorAll('#board .stone.placed').length`) === 4, '開始直後の石に placed が付いていません');
   check(
     op1.forbidden.length > 0 && JSON.stringify(op1.forbidden) === JSON.stringify(op1.expected),

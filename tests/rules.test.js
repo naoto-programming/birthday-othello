@@ -787,18 +787,27 @@ test('forbiddenCells: 序盤の制限と閉じた角を合わせる', () => {
   assert.deepEqual(forbiddenCells(state), [0, 7, at(2, 2), at(2, 3), at(2, 4), at(3, 2), at(3, 4), at(4, 2), at(4, 3), at(4, 4), 56, 63]);
 });
 
-test('openingBoard: 四隅から2マス以上離れたマスに置く(角と、角のとなり3マスには置かない)', () => {
+test('openingBoard: 角、角のとなり3マス、角から斜めに2つ目のマスには置かない', () => {
   const corners = [0, 7, 56, 63];
-  // 縦・横・斜めに数えた距離(1 = となり)
-  const dist = (a, b) => Math.max(Math.abs(Math.floor(a / 8) - Math.floor(b / 8)), Math.abs((a % 8) - (b % 8)));
-  for (let seed = 1; seed <= 200; seed++) {
+  // 角ごとに: 角、となり3マス、斜めに2つ目(2026-11-19 のユーザーの要望)
+  const excluded = [
+    0, 1, 8, 9, at(2, 2),
+    7, 6, 15, 14, at(2, 5),
+    56, 57, 48, 49, at(5, 2),
+    63, 62, 55, 54, at(5, 5),
+  ];
+  const used = new Set();
+  for (let seed = 1; seed <= 1000; seed++) {
     const board = openingBoard(seededRandom(seed));
     const idxs = board.flatMap((s, i) => (s ? [i] : []));
     assert.equal(idxs.length, 4, `seed ${seed}`);
-    for (const i of idxs) for (const corner of corners) assert.ok(dist(i, corner) >= 2, `seed ${seed}: ${i} は角 ${corner} に近い`);
+    for (const i of idxs) assert.ok(!excluded.includes(i), `seed ${seed}: ${i} は角の近く`);
+    idxs.forEach((i) => used.add(i));
     // その結果、開始時の四隅はすべて閉じている
     assert.deepEqual(lockedCorners(board), corners, `seed ${seed}`);
   }
+  // 除きすぎていない: 残りの44マスはどれも使われる
+  assert.deepEqual([...used].sort((a, b) => a - b), Array.from({ length: 64 }, (_, i) => i).filter((i) => !excluded.includes(i)));
 });
 
 test('lockedCorners: 8×8 を埋めて 12×12 に広げた直後は四隅が閉じている', () => {
