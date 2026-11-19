@@ -73,7 +73,9 @@ export function seededRandom(seed) {
   };
 }
 
-// 最初の石の盤面: 黒・白・黒・白の順に1個ずつ。すでに置いた石の周り8マスと、四隅には置かない。
+// 最初の石の盤面: 黒・白・黒・白の順に1個ずつ。すでに置いた石の周り8マスには置かない。
+// 四隅から2マス以上(縦・横・斜めに数えて)離れたマスにだけ置く。角と、角のとなり3マスには置かないので、
+// 開始時の四隅はすべて閉じている。
 export function openingBoard(random) {
   const board = Array(SIZE * SIZE).fill(null);
   const placed = [];
@@ -83,7 +85,8 @@ export function openingBoard(random) {
       if (board[idx]) continue;
       const r = Math.floor(idx / SIZE);
       const c = idx % SIZE;
-      if (idx === 0 || idx === SIZE - 1 || idx === SIZE * (SIZE - 1) || idx === SIZE * SIZE - 1) continue;
+      // いちばん近い角までの距離は max(近い方の端までの行数, 近い方の端までの列数)
+      if (Math.min(r, SIZE - 1 - r) < 2 && Math.min(c, SIZE - 1 - c) < 2) continue;
       if (placed.every((q) => Math.abs(Math.floor(q / SIZE) - r) > 1 || Math.abs((q % SIZE) - c) > 1)) candidates.push(idx);
     }
     const idx = candidates[Math.floor(random() * candidates.length)];
